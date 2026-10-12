@@ -1,0 +1,2 @@
+# awsshp-maven
+maven applications

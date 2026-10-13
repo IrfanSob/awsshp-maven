@@ -1,6 +1,6 @@
 # S3 Bucket for Logs
 module "s3_logs" {
-  source = "../../Terraform-Module/aws-s3-bucket"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-s3-bucket?ref=main"
 
   bucket_name       = "maven-logs-908027374739"
   versioning_status = "Disabled"
@@ -38,7 +38,7 @@ module "s3_logs" {
 
 # CloudTrail Management Events Trail
 module "cloudtrail_management_events" {
-  source = "../../Terraform-Module/aws-cloudtrail-management-events-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cloudtrail-management-events-v6?ref=main"
 
   trail_name                 = "maven-trail"
   create_s3_bucket           = false
@@ -56,7 +56,7 @@ module "cloudtrail_management_events" {
 
 # SNS Topic - Notifications (CloudWatch alarms and EventBridge rules)
 module "sns_notifications" {
-  source = "../../Terraform-Module/aws-sns-topic-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-sns-topic-v6?ref=main"
 
   name              = "maven-notifications"
   display_name      = "Maven POC Notifications"
@@ -78,7 +78,7 @@ module "sns_notifications" {
 
 # GuardDuty
 module "guardduty" {
-  source = "../../Terraform-Module/aws-guardduty"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-guardduty?ref=main"
 
   enable_kubernetes_protection = false
 
@@ -89,7 +89,7 @@ module "guardduty" {
 
 # EventBridge - GuardDuty, CodeDeploy and AWS Health Notifications
 module "eventbridge_notifications" {
-  source = "../../Terraform-Module/aws-eventbridge-rule-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-eventbridge-rule-v6?ref=main"
 
   rules = {
     "guardduty-findings" = {
@@ -178,7 +178,7 @@ module "eventbridge_notifications" {
 
 # Budgets
 module "budgets" {
-  source = "../../Terraform-Module/aws-budgets"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-budgets?ref=main"
 
   notification_email_addresses = var.budget_notification_emails
 
@@ -215,7 +215,7 @@ module "budgets" {
 
 # Cost Anomaly Detection
 module "cost_anomaly_detection" {
-  source = "../../Terraform-Module/aws-cost-anomaly-detection"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cost-anomaly-detection?ref=main"
 
   name_prefix      = "maven"
   create_sns_topic = false
@@ -243,7 +243,7 @@ module "cost_anomaly_detection" {
 
 # IAM Role - Prometheus EC2 (ECS service discovery)
 module "iam_role_monitoring" {
-  source = "../../Terraform-Module/aws-iam-role"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-iam-role?ref=main"
 
   name                    = "maven-monitoring-ec2-role"
   description             = "Prometheus and Grafana instance: SSM, CloudWatch agent and ECS service discovery"
@@ -306,7 +306,7 @@ data "aws_ssm_parameter" "al2023_x86_64" {
 
 # EC2 Instance - Prometheus and Grafana
 module "ec2_monitoring" {
-  source = "../../Terraform-Module/aws-ec2-instances"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-instances?ref=main"
 
   create_iam_role                    = false
   existing_iam_instance_profile_name = module.iam_role_monitoring.instance_profile_name
@@ -353,7 +353,7 @@ module "ec2_monitoring" {
 
 # AWS Backup - Prometheus and Grafana AMI
 module "backup_monitoring" {
-  source = "../../Terraform-Module/aws-backup"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-backup?ref=main"
 
   name_prefix       = "maven"
   backup_vault_name = "maven-backup-vault"
@@ -382,7 +382,7 @@ module "backup_monitoring" {
 
 # CloudWatch Alarms
 module "cloudwatch_alarms" {
-  source = "../../Terraform-Module/aws-cloudwatch-alarms-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cloudwatch-alarms-v6?ref=main"
 
   alarm_name_prefix     = "maven"
   default_alarm_actions = [module.sns_notifications.topic_arn]

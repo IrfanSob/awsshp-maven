@@ -258,7 +258,7 @@ locals {
 
 # CMK
 module "kms_cmk" {
-  source = "../../Terraform-Module/aws-cmk-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cmk-v6?ref=main"
 
   description             = "KMS CMK for the Maven POC"
   deletion_window_in_days = 7
@@ -276,7 +276,7 @@ module "kms_cmk" {
 # IAM GROUPS
 # Administrator
 module "iam_group_administrator" {
-  source = "../../Terraform-Module/aws-iam-user-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-iam-user-group?ref=main"
 
   group_name = "Administrator"
 
@@ -356,7 +356,7 @@ module "iam_group_administrator" {
 
 # ReadOnly
 module "iam_group_readonly" {
-  source = "../../Terraform-Module/aws-iam-user-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-iam-user-group?ref=main"
 
   group_name = "ReadOnly"
 
@@ -374,7 +374,7 @@ module "iam_group_readonly" {
 
 # Secrets Manager (Aurora master credential is managed by RDS)
 module "secrets" {
-  source = "../../Terraform-Module/aws-secrets-manager-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-secrets-manager-v6?ref=main"
 
   kms_key_id              = module.kms_cmk.kms_key_arn
   recovery_window_in_days = 7
@@ -440,7 +440,7 @@ module "secrets" {
 
 # Aurora PostgreSQL Serverless v2
 module "aurora" {
-  source = "../../Terraform-Module/aws-rds-aurora-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-rds-aurora-v6?ref=main"
 
   cluster_identifier = "maven-db"
   engine             = "aurora-postgresql"
@@ -489,7 +489,7 @@ module "aurora" {
 
 # ElastiCache Valkey
 module "valkey" {
-  source = "../../Terraform-Module/aws-elasticache"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-elasticache?ref=main"
 
   name           = "maven-valkey"
   description    = "Maven cache (Valkey)"
@@ -539,7 +539,7 @@ resource "aws_cloudwatch_log_group" "valkey_slow_log" {
 
 # S3 Bucket - Assets (NAS migration target)
 module "s3_assets" {
-  source = "../../Terraform-Module/aws-s3-bucket"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-s3-bucket?ref=main"
 
   bucket_name       = "maven-asset-908027374739"
   versioning_status = "Disabled"
@@ -558,7 +558,7 @@ module "s3_assets" {
 
 # S3 Bucket - CI/CD Artifacts (GitLab CI uploads source bundles and deployment specs)
 module "s3_cicd" {
-  source = "../../Terraform-Module/aws-s3-bucket"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-s3-bucket?ref=main"
 
   bucket_name       = "maven-cicd-artifacts-908027374739"
   versioning_status = "Enabled"
@@ -594,7 +594,7 @@ module "s3_cicd" {
 
 # ECR
 module "ecr" {
-  source = "../../Terraform-Module/aws-ecr-private-repository"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ecr-private-repository?ref=main"
 
   repositories         = [for k, s in local.services : s.repository]
   image_tag_mutability = "IMMUTABLE"
@@ -614,7 +614,7 @@ module "ecr" {
 
 # Internal ALB
 module "alb_internal" {
-  source = "../../Terraform-Module/aws-load-balancer"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-load-balancer?ref=main"
 
   name               = "maven-alb-internal"
   load_balancer_type = "application"
@@ -683,7 +683,7 @@ module "alb_internal" {
 
 # ECS Cluster (Fargate)
 module "ecs" {
-  source = "../../Terraform-Module/aws-ecs"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ecs?ref=main"
 
   cluster_name       = local.ecs_cluster_name
   container_insights = "disabled"
@@ -841,7 +841,7 @@ module "ecs" {
 
 # Cognito User Pool (OAuth2 client_credentials for external systems)
 module "cognito" {
-  source = "../../Terraform-Module/aws-cognito-user-pool-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cognito-user-pool-v6?ref=main"
 
   name                = "maven-userpool"
   user_pool_tier      = "LITE"
@@ -883,7 +883,7 @@ module "cognito" {
 
 # API Gateway REST API
 module "api_gateway" {
-  source = "../../Terraform-Module/aws-api-gateway-rest-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-api-gateway-rest-v6?ref=main"
 
   name          = "maven-api"
   description   = "Maven DoFS REST API"
@@ -993,7 +993,7 @@ module "api_gateway" {
 
 # WAF - API Gateway
 module "waf_api" {
-  source = "../../Terraform-Module/aws-waf"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-waf?ref=main"
 
   name        = "maven-api-waf"
   description = "Web Application Firewall for the Maven REST API"
@@ -1044,7 +1044,7 @@ module "waf_api" {
 
 # CodeBuild - one project per service (.NET build, test, push to ECR)
 module "codebuild" {
-  source   = "../../Terraform-Module/aws-codebuild-v6"
+  source   = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-codebuild-v6?ref=main"
   for_each = local.services
 
   name        = "${each.value.name}-build"
@@ -1084,7 +1084,7 @@ module "codebuild" {
 
 # CodeDeploy - ECS blue/green
 module "codedeploy" {
-  source = "../../Terraform-Module/aws-codedeploy-v6"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-codedeploy-v6?ref=main"
 
   application_name = "maven-ecs"
   compute_platform = "ECS"
@@ -1164,7 +1164,7 @@ data "aws_ssm_parameter" "datasync_ami" {
 
 # EC2 Instances - k6 Load Test and DataSync Agent (toggle: create_loadtest_instance, create_datasync_agent_instance)
 module "ec2_tools" {
-  source = "../../Terraform-Module/aws-ec2-instances"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-instances?ref=main"
 
   iam_role_name             = "maven-ec2-instance-role"
   iam_instance_profile_name = "maven-ec2-instance-profile"
@@ -1219,7 +1219,7 @@ module "ec2_tools" {
 
 # DataSync - NAS to S3 (toggle: create_datasync_agent_instance, datasync_agent_activation_key)
 module "datasync" {
-  source = "../../Terraform-Module/aws-datasync"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-datasync?ref=main"
 
   name_prefix = "maven"
 

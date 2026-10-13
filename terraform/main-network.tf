@@ -10,7 +10,7 @@ locals {
 
 # VPC
 module "vpc" {
-  source = "../../Terraform-Module/aws-vpc"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc?ref=main"
 
   vpc_name = "maven-vpc"
   vpc_cidr = "10.100.0.0/16"
@@ -43,7 +43,7 @@ module "vpc" {
 
 # VPC Route Tables - Public and App (Internet Gateway and NAT routes)
 module "vpc_route_tables" {
-  source = "../../Terraform-Module/aws-vpc/aws-vpc-route-table"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc/aws-vpc-route-table?ref=main"
 
   vpc_id   = module.vpc.vpc_id
   vpc_name = "maven-vpc"
@@ -67,7 +67,7 @@ module "vpc_route_tables" {
 
 # VPC Route Tables - LB and Data (no internet route)
 module "vpc_route_tables_isolated" {
-  source = "../../Terraform-Module/aws-vpc/aws-vpc-route-table"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc/aws-vpc-route-table?ref=main"
 
   vpc_id   = module.vpc.vpc_id
   vpc_name = "maven-vpc"
@@ -85,7 +85,7 @@ module "vpc_route_tables_isolated" {
 
 # S3 Endpoint Gateway
 module "s3_gateway_endpoint" {
-  source = "../../Terraform-Module/aws-vpc-endpoint/vpc-endpoint-s3"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc-endpoint/vpc-endpoint-s3?ref=main"
 
   vpc_id        = module.vpc.vpc_id
   region        = var.region
@@ -105,7 +105,7 @@ module "s3_gateway_endpoint" {
 
 # Interface Endpoint - DataSync (toggle: create_datasync_agent_instance)
 module "vpce_datasync" {
-  source = "../../Terraform-Module/aws-vpc-endpoint/interface-endpoints"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc-endpoint/interface-endpoints?ref=main"
   count  = var.create_datasync_agent_instance ? 1 : 0
 
   name_prefix                = "maven-datasync"
@@ -159,7 +159,7 @@ data "aws_network_interface" "vpce_datasync" {
 
 # VPC Flow Logs
 module "vpc_flow_logs" {
-  source = "../../Terraform-Module/aws-vpc-flow-logs"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc-flow-logs?ref=main"
 
   vpc_id         = module.vpc.vpc_id
   log_group_name = "/aws/vpc/maven-flow-logs"
@@ -174,7 +174,7 @@ module "vpc_flow_logs" {
 
 # Site-to-Site VPN (toggle: local.customer_gateway_ip)
 module "vpn_onprem" {
-  source = "../../Terraform-Module/aws-vpn-site-to-site"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpn-site-to-site?ref=main"
   count  = local.vpn_enabled ? 1 : 0
 
   name = "maven-vpn-onprem"
@@ -206,7 +206,7 @@ module "vpn_onprem" {
 # SECURITY GROUPS
 # API Gateway VPC Link
 module "sg_vpc_link" {
-  source = "../../Terraform-Module/aws-ec2-security-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
   name        = "maven-vpclink-sg"
   description = "Security Group for the API Gateway VPC link to the internal ALB"
@@ -230,7 +230,7 @@ module "sg_vpc_link" {
 
 # Internal ALB
 module "sg_alb" {
-  source = "../../Terraform-Module/aws-ec2-security-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
   name        = "maven-alb-sg"
   description = "Security Group for the internal Application Load Balancer"
@@ -287,7 +287,7 @@ module "sg_alb" {
 
 # ECS Tasks
 module "sg_ecs" {
-  source = "../../Terraform-Module/aws-ec2-security-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
   name        = "maven-ecs-sg"
   description = "Security Group for ECS Fargate tasks"
@@ -328,7 +328,7 @@ module "sg_ecs" {
 
 # Aurora
 module "sg_aurora" {
-  source = "../../Terraform-Module/aws-ec2-security-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
   name        = "maven-aurora-sg"
   description = "Security Group for Aurora PostgreSQL"
@@ -364,7 +364,7 @@ module "sg_aurora" {
 
 # ElastiCache Valkey
 module "sg_valkey" {
-  source = "../../Terraform-Module/aws-ec2-security-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
   name        = "maven-valkey-sg"
   description = "Security Group for ElastiCache Valkey"
@@ -388,7 +388,7 @@ module "sg_valkey" {
 
 # Monitoring (Prometheus and Grafana)
 module "sg_monitoring" {
-  source = "../../Terraform-Module/aws-ec2-security-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
   name        = "maven-monitoring-sg"
   description = "Security Group for the Prometheus and Grafana instance"
@@ -433,7 +433,7 @@ module "sg_monitoring" {
 
 # Load Test (k6)
 module "sg_loadtest" {
-  source = "../../Terraform-Module/aws-ec2-security-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
   name        = "maven-loadtest-sg"
   description = "Security Group for the k6 load test instance"
@@ -457,7 +457,7 @@ module "sg_loadtest" {
 
 # DataSync Agent
 module "sg_datasync_agent" {
-  source = "../../Terraform-Module/aws-ec2-security-group"
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
   name        = "maven-datasync-agent-sg"
   description = "Security Group for the DataSync agent instance"

@@ -1,7 +1,7 @@
 # Site-to-Site VPN (Kalbe side configuration, AF 3.9)
 output "vpn_tunnels" {
   description = "AWS tunnel endpoints and inside addresses for the Kalbe VPN device"
-  value = local.vpn_enabled ? {
+  value = length(module.vpn_onprem) > 0 ? {
     tunnel1 = {
       outside_ip = module.vpn_onprem[0].tunnel1_address
       cgw_inside = module.vpn_onprem[0].tunnel1_cgw_inside_address
@@ -17,7 +17,7 @@ output "vpn_tunnels" {
 
 output "vpn_preshared_keys" {
   description = "Tunnel preshared keys for the Kalbe VPN device"
-  value = local.vpn_enabled ? {
+  value = length(module.vpn_onprem) > 0 ? {
     tunnel1 = module.vpn_onprem[0].tunnel1_preshared_key
     tunnel2 = module.vpn_onprem[0].tunnel2_preshared_key
   } : null
@@ -89,13 +89,13 @@ output "cicd_codedeploy_application" {
 output "cicd_services" {
   description = "Per-service names used by the GitLab CI pipeline"
   value = {
-    for k, s in local.services : k => {
+    for k in ["dofs", "shortenurl"] : k => {
       codebuild_project           = module.codebuild[k].project_name
       codedeploy_deployment_group = module.codedeploy.deployment_group_names[k]
-      ecr_repository_url          = module.ecr.repository_urls[s.repository]
-      task_definition_family      = s.name
+      ecr_repository_url          = module.ecr.repository_urls["maven-${k}"]
+      task_definition_family      = "maven-${k}"
       container_name              = k
-      container_port              = s.container_port
+      container_port              = 8080 # TBD (Kalbe, DDD T17) - must match the task definition
     }
   }
 }

@@ -1,261 +1,3 @@
-locals {
-  ecs_cluster_name     = "maven-cluster"
-  ecs_cpu_architecture = "X86_64" # TBD (Kalbe) - X86_64 or ARM64, architecture of the .NET container images
-
-  # ECS services; third service (maven-backend-3) is TBD (Kalbe, DDD T17)
-  ecs_services = {
-    "dofs" = {
-      container_port             = 8080 # TBD (Kalbe, DDD T17)
-      listener_port              = 8081
-      test_listener_port         = 9081
-      health_check_path          = "/healthcheck" # TBD (Kalbe)
-      cpu                        = 512
-      memory                     = 1024
-      desired_count              = 2
-      min_capacity               = 2
-      max_capacity               = 20
-      request_count_per_target   = null # TBD (DDD T18) - ALBRequestCountPerTarget target; null skips the policy
-      cpu_target_utilization     = 70
-      memory_target_utilization  = 80
-      health_check_grace_period  = 60
-      deregistration_delay       = 30
-      image_tag                  = "latest"
-      api_base_path              = "dofs" # TBD (Kalbe, DDD T11)
-      environment                = {}     # TBD (Kalbe) - env name = value; tokens {{aurora_endpoint}}, {{valkey_endpoint}}, {{valkey_port}}, {{assets_bucket}}, {{region}}
-      secrets                    = {}     # TBD (Kalbe) - env name = "<secret>:<json key>", secret is aurora-master, shortendb, mavendb, valkey or cognito-app
-      enable_application_signals = false
-    }
-    "shortenurl" = {
-      container_port             = 8080 # TBD (Kalbe, DDD T17)
-      listener_port              = 8082
-      test_listener_port         = 9082
-      health_check_path          = "/healthcheck" # TBD (Kalbe)
-      cpu                        = 512
-      memory                     = 1024
-      desired_count              = 2
-      min_capacity               = 2
-      max_capacity               = 20
-      request_count_per_target   = null # TBD (DDD T18) - ALBRequestCountPerTarget target; null skips the policy
-      cpu_target_utilization     = 70
-      memory_target_utilization  = 80
-      health_check_grace_period  = 60
-      deregistration_delay       = 30
-      image_tag                  = "latest"
-      api_base_path              = "shortenurl" # TBD (Kalbe, DDD T11)
-      environment                = {}           # TBD (Kalbe)
-      secrets                    = {}           # TBD (Kalbe)
-      enable_application_signals = false
-    }
-  }
-
-  # Aurora application users (DDD T7), one <db>/aurora secret each
-  aurora_app_users = {
-    "shortendb" = "" # TBD (Kalbe) - application username for ShortenDB
-    "mavendb"   = "" # TBD (Kalbe) - application username for MavenDB
-  }
-
-  # Cognito resource server scopes (DDD T11/T12), scope name = description
-  cognito_scopes = {} # TBD (Kalbe) - e.g. "dofs.write" = "Submit DoFS claims"
-
-  # API clients (DDD T13/T15); empty scopes create the client without OAuth flow, null limits skip throttle/quota
-  api_clients = {
-    "kartini" = {
-      scopes                = [] # TBD (DDD T13)
-      access_token_validity = 60
-      rate_limit            = null # TBD (DDD T15) - requests per second
-      burst_limit           = null # TBD (DDD T15)
-      quota_per_day         = null # TBD (DDD T15)
-    }
-    "kpoin" = {
-      scopes                = [] # TBD (DDD T13)
-      access_token_validity = 60
-      rate_limit            = null # TBD (DDD T15) - requests per second
-      burst_limit           = null # TBD (DDD T15)
-      quota_per_day         = null # TBD (DDD T15)
-    }
-    "app" = {
-      scopes                = [] # TBD (DDD T13)
-      access_token_validity = 60
-      rate_limit            = null # TBD (DDD T15) - requests per second
-      burst_limit           = null # TBD (DDD T15)
-      quota_per_day         = null # TBD (DDD T15)
-    }
-    "loadtest" = {
-      scopes                = [] # TBD (DDD T13) - same scopes as the endpoints under test
-      access_token_validity = 60
-      rate_limit            = null # TBD - load test target
-      burst_limit           = null # TBD - load test target
-      quota_per_day         = null
-    }
-  }
-
-  services = {
-    for k, s in local.ecs_services : k => merge(s, {
-      name           = "maven-${k}"
-      repository     = "maven-${k}"
-      log_group_name = "/ecs/maven/${k}"
-    })
-  }
-
-  otel_volume_name = "opentelemetry-auto-instrumentation"
-  otel_arch_dir    = local.ecs_cpu_architecture == "ARM64" ? "linux-arm64" : "linux-x64"
-
-  env_tokens = {
-    aurora_endpoint        = module.aurora.cluster_endpoint
-    aurora_reader_endpoint = module.aurora.cluster_reader_endpoint
-    aurora_port            = tostring(module.aurora.cluster_port)
-    valkey_endpoint        = module.valkey.primary_endpoint_address
-    valkey_port            = "6379"
-    assets_bucket          = module.s3_assets.bucket_id
-    region                 = var.region
-  }
-
-  secret_refs = merge(
-    {
-      "aurora-master" = module.aurora.cluster_master_user_secret_arn
-      "valkey"        = module.secrets.secret_arns["valkey"]
-    },
-    { for db in keys(local.aurora_app_users) : db => module.secrets.secret_arns[db] },
-    { for k, v in { "cognito-app" = try(module.secrets.secret_arns["cognito-app"], null) } : k => v if contains(keys(local.api_clients), "app") }
-  )
-
-  api_scopes = [for scope in keys(local.cognito_scopes) : "maven-api/${scope}"]
-
-  container_definitions = {
-    for k, s in local.services : k => concat(
-      [
-        merge({
-          name      = k
-          image     = "${module.ecr.repository_urls[s.repository]}:${s.image_tag}"
-          essential = true
-          portMappings = [
-            {
-              name          = "${k}-http"
-              containerPort = s.container_port
-              protocol      = "tcp"
-            }
-          ]
-          environment = concat(
-            [
-              for n, v in s.environment : {
-                name = n
-                value = replace(replace(replace(replace(replace(replace(replace(v,
-                  "{{aurora_endpoint}}", local.env_tokens.aurora_endpoint),
-                  "{{aurora_reader_endpoint}}", local.env_tokens.aurora_reader_endpoint),
-                  "{{aurora_port}}", local.env_tokens.aurora_port),
-                  "{{valkey_endpoint}}", local.env_tokens.valkey_endpoint),
-                  "{{valkey_port}}", local.env_tokens.valkey_port),
-                  "{{assets_bucket}}", local.env_tokens.assets_bucket),
-                "{{region}}", local.env_tokens.region)
-              }
-            ],
-            [for e in [
-              { name = "OTEL_RESOURCE_ATTRIBUTES", value = "aws.log.group.names=${s.log_group_name},service.name=${s.name}" },
-              { name = "CORECLR_ENABLE_PROFILING", value = "1" },
-              { name = "CORECLR_PROFILER", value = "{918728DD-259F-4A6A-AC2B-B85E1B658318}" },
-              { name = "CORECLR_PROFILER_PATH", value = "/otel-auto-instrumentation/${local.otel_arch_dir}/OpenTelemetry.AutoInstrumentation.Native.so" },
-              { name = "DOTNET_ADDITIONAL_DEPS", value = "/otel-auto-instrumentation/AdditionalDeps" },
-              { name = "DOTNET_SHARED_STORE", value = "/otel-auto-instrumentation/store" },
-              { name = "DOTNET_STARTUP_HOOKS", value = "/otel-auto-instrumentation/net/OpenTelemetry.AutoInstrumentation.StartupHook.dll" },
-              { name = "OTEL_DOTNET_AUTO_HOME", value = "/otel-auto-instrumentation" },
-              { name = "OTEL_DOTNET_AUTO_PLUGINS", value = "AWS.Distro.OpenTelemetry.AutoInstrumentation.Plugin, AWS.Distro.OpenTelemetry.AutoInstrumentation" },
-              { name = "OTEL_LOGS_EXPORTER", value = "none" },
-              { name = "OTEL_METRICS_EXPORTER", value = "none" },
-              { name = "OTEL_EXPORTER_OTLP_PROTOCOL", value = "http/protobuf" },
-              { name = "OTEL_AWS_APPLICATION_SIGNALS_ENABLED", value = "true" },
-              { name = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT", value = "http://localhost:4316/v1/metrics" },
-              { name = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", value = "http://localhost:4316/v1/traces" },
-              { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = "http://localhost:4316" },
-              { name = "OTEL_TRACES_SAMPLER", value = "xray" },
-              { name = "OTEL_TRACES_SAMPLER_ARG", value = "endpoint=http://localhost:2000" },
-              { name = "OTEL_PROPAGATORS", value = "tracecontext,baggage,b3,xray" }
-            ] : e if s.enable_application_signals]
-          )
-          logConfiguration = {
-            logDriver = "awslogs"
-            options = {
-              awslogs-group         = s.log_group_name
-              awslogs-region        = var.region
-              awslogs-stream-prefix = "app"
-            }
-          }
-          },
-          concat(
-            [for x in [{
-              secrets = [
-                for n, ref in s.secrets : {
-                  name      = n
-                  valueFrom = "${local.secret_refs[split(":", ref)[0]]}:${split(":", ref)[1]}::"
-                }
-              ]
-            }] : x if length(s.secrets) > 0],
-            [for x in [{
-              dependsOn   = [{ containerName = "init", condition = "SUCCESS" }]
-              mountPoints = [{ sourceVolume = local.otel_volume_name, containerPath = "/otel-auto-instrumentation", readOnly = false }]
-            }] : x if s.enable_application_signals]
-          )...
-        )
-      ],
-      [for c in [
-        {
-          name        = "init"
-          image       = "public.ecr.aws/aws-observability/adot-autoinstrumentation-dotnet:vX.Y.Z" # TBD - pin the latest release tag before enabling Application Signals
-          essential   = false
-          command     = ["cp", "-a", "autoinstrumentation/.", "/otel-auto-instrumentation"]
-          mountPoints = [{ sourceVolume = local.otel_volume_name, containerPath = "/otel-auto-instrumentation", readOnly = false }]
-          logConfiguration = {
-            logDriver = "awslogs"
-            options = {
-              awslogs-group         = s.log_group_name
-              awslogs-region        = var.region
-              awslogs-stream-prefix = "init"
-            }
-          }
-        },
-        {
-          name      = "ecs-cwagent"
-          image     = "public.ecr.aws/cloudwatch-agent/cloudwatch-agent:latest"
-          essential = true
-          environment = [
-            {
-              name = "CW_CONFIG_CONTENT"
-              value = jsonencode({
-                traces = { traces_collected = { application_signals = {} } }
-                logs   = { metrics_collected = { application_signals = {} } }
-              })
-            }
-          ]
-          logConfiguration = {
-            logDriver = "awslogs"
-            options = {
-              awslogs-group         = s.log_group_name
-              awslogs-region        = var.region
-              awslogs-stream-prefix = "cwagent"
-            }
-          }
-        }
-      ] : c if s.enable_application_signals]
-    )
-  }
-
-  api_routes = merge([
-    for k, s in local.services : {
-      "${k}-root" = {
-        path          = "/${s.api_base_path}"
-        proxy         = false
-        service_key   = k
-        listener_port = s.listener_port
-      }
-      "${k}-proxy" = {
-        path          = "/${s.api_base_path}/{proxy+}"
-        proxy         = true
-        service_key   = k
-        listener_port = s.listener_port
-      }
-    } if s.api_base_path != null
-  ]...)
-}
-
 # CMK
 module "kms_cmk" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cmk-v6?ref=main"
@@ -379,59 +121,70 @@ module "secrets" {
   kms_key_id              = module.kms_cmk.kms_key_arn
   recovery_window_in_days = 7
 
-  secrets = merge(
-    {
-      for db, username in local.aurora_app_users : db => {
-        name        = "${db}/aurora"
-        description = "Aurora PostgreSQL application credential for ${db}"
+  secrets = {
+    "shortendb" = {
+      name        = "shortendb/aurora"
+      description = "Aurora PostgreSQL application credential for ShortenDB"
 
-        generate_random_password = {
-          length  = 32
-          special = false
-        }
-        generated_password_json_key = "password"
-        secret_string_template = {
-          username = username
-          dbname   = db
-          engine   = "postgres"
-          host     = module.aurora.cluster_endpoint
-          port     = tostring(module.aurora.cluster_port)
-        }
+      generate_random_password = {
+        length  = 32
+        special = false
       }
-    },
-    {
-      "valkey" = {
-        name        = "cache-valkey/auth"
-        description = "ElastiCache Valkey AUTH token"
+      generated_password_json_key = "password"
+      secret_string_template = {
+        username = "" # TBD (Kalbe, DDD T7) - application username for ShortenDB
+        dbname   = "shortendb"
+        engine   = "postgres"
+        host     = module.aurora.cluster_endpoint
+        port     = tostring(module.aurora.cluster_port)
+      }
+    }
+    "mavendb" = {
+      name        = "mavendb/aurora"
+      description = "Aurora PostgreSQL application credential for MavenDB"
 
-        generate_random_password = {
-          length  = 64
-          special = false
-        }
-        generated_password_json_key = "password"
-        secret_string_template = {
-          username = "default"
-          port     = "6379"
-        }
+      generate_random_password = {
+        length  = 32
+        special = false
       }
-    },
-    { for k, v in {
-      "cognito-app" = {
-        name        = "cognito/maven-app"
-        description = "Cognito app client credential of the Maven application"
+      generated_password_json_key = "password"
+      secret_string_template = {
+        username = "" # TBD (Kalbe, DDD T7) - application username for MavenDB
+        dbname   = "mavendb"
+        engine   = "postgres"
+        host     = module.aurora.cluster_endpoint
+        port     = tostring(module.aurora.cluster_port)
       }
-    } : k => v if contains(keys(local.api_clients), "app") }
-  )
+    }
+    "valkey" = {
+      name        = "cache-valkey/auth"
+      description = "ElastiCache Valkey AUTH token"
 
-  secret_values = { for k, v in {
+      generate_random_password = {
+        length  = 64
+        special = false
+      }
+      generated_password_json_key = "password"
+      secret_string_template = {
+        username = "default"
+        port     = "6379"
+      }
+    }
+    "cognito-app" = {
+      name        = "cognito/maven-app"
+      description = "Cognito app client credential of the Maven application"
+    }
+  }
+
+  secret_values = {
     "cognito-app" = {
       secret_string = jsonencode({
         TOKEN_URL     = module.cognito.oauth2_token_url
-        CLIENT_ID     = try(module.cognito.client_ids["app"], "")
-        CLIENT_SECRET = try(module.cognito.client_secrets["app"], "")
+        CLIENT_ID     = module.cognito.client_ids["app"]
+        CLIENT_SECRET = module.cognito.client_secrets["app"]
       })
     }
-  } : k => v if contains(keys(local.api_clients), "app") }
+  }
 
   tags = {
     "Resource" = "SecretsManager"
@@ -596,7 +349,7 @@ module "s3_cicd" {
 module "ecr" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ecr-private-repository?ref=main"
 
-  repositories         = [for k, s in local.services : s.repository]
+  repositories         = ["maven-dofs", "maven-shortenurl"]
   image_tag_mutability = "IMMUTABLE"
   scan_on_push         = true
 
@@ -635,57 +388,110 @@ module "alb_internal" {
     enabled = true
   }
 
-  target_groups = merge([
-    for k, s in local.services : {
-      for color in ["blue", "green"] : "${k}-${color}" => {
-        name                 = "tg-maven-${k}-${color}"
-        port                 = s.container_port
-        protocol             = "HTTP"
-        target_type          = "ip"
-        deregistration_delay = s.deregistration_delay
+  target_groups = {
+    "dofs-blue" = {
+      name                 = "tg-maven-dofs-blue"
+      port                 = 8080 # TBD (Kalbe, DDD T17) - dofs container port
+      protocol             = "HTTP"
+      target_type          = "ip"
+      deregistration_delay = 30
 
-        health_check = {
-          path     = s.health_check_path
-          protocol = "HTTP"
-          matcher  = "200"
-          interval = 15
-          timeout  = 5
-        }
+      health_check = {
+        path     = "/healthcheck" # TBD (Kalbe) - dofs health check path
+        protocol = "HTTP"
+        matcher  = "200"
+        interval = 15
+        timeout  = 5
       }
     }
-  ]...)
+    "dofs-green" = {
+      name                 = "tg-maven-dofs-green"
+      port                 = 8080 # TBD (Kalbe, DDD T17) - dofs container port
+      protocol             = "HTTP"
+      target_type          = "ip"
+      deregistration_delay = 30
 
-  listeners = merge(
-    {
-      for k, s in local.services : k => {
-        port                          = s.listener_port
-        protocol                      = "HTTP"
-        action_type                   = "forward"
-        target_group_key              = "${k}-blue"
-        ignore_default_action_changes = true
+      health_check = {
+        path     = "/healthcheck" # TBD (Kalbe) - dofs health check path
+        protocol = "HTTP"
+        matcher  = "200"
+        interval = 15
+        timeout  = 5
       }
-    },
-    {
-      for k, s in local.services : "${k}-test" => {
-        port                          = s.test_listener_port
-        protocol                      = "HTTP"
-        action_type                   = "forward"
-        target_group_key              = "${k}-green"
-        ignore_default_action_changes = true
-      } if s.test_listener_port != null
     }
-  )
+    "shortenurl-blue" = {
+      name                 = "tg-maven-shortenurl-blue"
+      port                 = 8080 # TBD (Kalbe, DDD T17) - shortenurl container port
+      protocol             = "HTTP"
+      target_type          = "ip"
+      deregistration_delay = 30
+
+      health_check = {
+        path     = "/healthcheck" # TBD (Kalbe) - shortenurl health check path
+        protocol = "HTTP"
+        matcher  = "200"
+        interval = 15
+        timeout  = 5
+      }
+    }
+    "shortenurl-green" = {
+      name                 = "tg-maven-shortenurl-green"
+      port                 = 8080 # TBD (Kalbe, DDD T17) - shortenurl container port
+      protocol             = "HTTP"
+      target_type          = "ip"
+      deregistration_delay = 30
+
+      health_check = {
+        path     = "/healthcheck" # TBD (Kalbe) - shortenurl health check path
+        protocol = "HTTP"
+        matcher  = "200"
+        interval = 15
+        timeout  = 5
+      }
+    }
+  }
+
+  listeners = {
+    "dofs" = {
+      port                          = 8081
+      protocol                      = "HTTP"
+      action_type                   = "forward"
+      target_group_key              = "dofs-blue"
+      ignore_default_action_changes = true
+    }
+    "dofs-test" = {
+      port                          = 9081
+      protocol                      = "HTTP"
+      action_type                   = "forward"
+      target_group_key              = "dofs-green"
+      ignore_default_action_changes = true
+    }
+    "shortenurl" = {
+      port                          = 8082
+      protocol                      = "HTTP"
+      action_type                   = "forward"
+      target_group_key              = "shortenurl-blue"
+      ignore_default_action_changes = true
+    }
+    "shortenurl-test" = {
+      port                          = 9082
+      protocol                      = "HTTP"
+      action_type                   = "forward"
+      target_group_key              = "shortenurl-green"
+      ignore_default_action_changes = true
+    }
+  }
 
   tags = {
     "Resource" = "LoadBalancer"
   }
 }
 
-# ECS Cluster (Fargate)
+# ECS Cluster (Fargate) - third service maven-backend-3 is TBD (Kalbe, DDD T17)
 module "ecs" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ecs?ref=main"
 
-  cluster_name       = local.ecs_cluster_name
+  cluster_name       = "maven-cluster"
   container_insights = "disabled"
 
   create_service_linked_role = true
@@ -704,9 +510,15 @@ module "ecs" {
       Version = "2012-10-17"
       Statement = [
         {
-          Effect   = "Allow"
-          Action   = ["secretsmanager:GetSecretValue"]
-          Resource = values(local.secret_refs)
+          Effect = "Allow"
+          Action = ["secretsmanager:GetSecretValue"]
+          Resource = [
+            module.aurora.cluster_master_user_secret_arn,
+            module.secrets.secret_arns["shortendb"],
+            module.secrets.secret_arns["mavendb"],
+            module.secrets.secret_arns["valkey"],
+            module.secrets.secret_arns["cognito-app"]
+          ]
         },
         {
           Effect   = "Allow"
@@ -750,38 +562,97 @@ module "ecs" {
   }
 
   task_log_groups = {
-    for k, s in local.services : s.log_group_name => {
+    "/ecs/maven/dofs" = {
+      retention_in_days = 30
+    }
+    "/ecs/maven/shortenurl" = {
       retention_in_days = 30
     }
   }
 
   task_definitions = {
-    for k, s in local.services : k => {
-      family                     = s.name
-      cpu                        = tostring(s.cpu)
-      memory                     = tostring(s.memory)
-      requires_compatibilities   = ["FARGATE"]
-      container_definitions_json = jsonencode(local.container_definitions[k])
+    "dofs" = {
+      family                   = "maven-dofs"
+      cpu                      = "512"
+      memory                   = "1024"
+      requires_compatibilities = ["FARGATE"]
+      container_definitions_json = jsonencode([
+        {
+          name      = "dofs"
+          image     = "${module.ecr.repository_urls["maven-dofs"]}:latest"
+          essential = true
+          portMappings = [
+            {
+              name          = "dofs-http"
+              containerPort = 8080 # TBD (Kalbe, DDD T17)
+              protocol      = "tcp"
+            }
+          ]
+          environment = [] # TBD (Kalbe) - e.g. { name = "DB_HOST", value = module.aurora.cluster_endpoint }
+          secrets     = [] # TBD (Kalbe) - e.g. { name = "DB_PASSWORD", valueFrom = "${module.secrets.secret_arns["mavendb"]}:password::" }
+          logConfiguration = {
+            logDriver = "awslogs"
+            options = {
+              awslogs-group         = "/ecs/maven/dofs"
+              awslogs-region        = var.region
+              awslogs-stream-prefix = "app"
+            }
+          }
+        }
+      ])
 
       runtime_platform = {
         operating_system_family = "LINUX"
-        cpu_architecture        = local.ecs_cpu_architecture
+        cpu_architecture        = "X86_64" # TBD (Kalbe) - X86_64 or ARM64
       }
+    }
+    "shortenurl" = {
+      family                   = "maven-shortenurl"
+      cpu                      = "512"
+      memory                   = "1024"
+      requires_compatibilities = ["FARGATE"]
+      container_definitions_json = jsonencode([
+        {
+          name      = "shortenurl"
+          image     = "${module.ecr.repository_urls["maven-shortenurl"]}:latest"
+          essential = true
+          portMappings = [
+            {
+              name          = "shortenurl-http"
+              containerPort = 8080 # TBD (Kalbe, DDD T17)
+              protocol      = "tcp"
+            }
+          ]
+          environment = [] # TBD (Kalbe) - e.g. { name = "DB_HOST", value = module.aurora.cluster_endpoint }
+          secrets     = [] # TBD (Kalbe) - e.g. { name = "DB_PASSWORD", valueFrom = "${module.secrets.secret_arns["shortendb"]}:password::" }
+          logConfiguration = {
+            logDriver = "awslogs"
+            options = {
+              awslogs-group         = "/ecs/maven/shortenurl"
+              awslogs-region        = var.region
+              awslogs-stream-prefix = "app"
+            }
+          }
+        }
+      ])
 
-      volumes = [for v in [{ name = local.otel_volume_name }] : v if s.enable_application_signals]
+      runtime_platform = {
+        operating_system_family = "LINUX"
+        cpu_architecture        = "X86_64" # TBD (Kalbe) - X86_64 or ARM64
+      }
     }
   }
 
   services = {
-    for k, s in local.services : k => {
-      name                       = s.name
-      task_definition_key        = k
-      desired_count              = s.desired_count
+    "dofs" = {
+      name                       = "maven-dofs"
+      task_definition_key        = "dofs"
+      desired_count              = 2
       deployment_controller_type = "CODE_DEPLOY"
       enable_execute_command     = true
       propagate_tags             = "SERVICE"
 
-      health_check_grace_period_seconds = s.health_check_grace_period
+      health_check_grace_period_seconds = 60
 
       launch_type = "FARGATE"
 
@@ -793,43 +664,90 @@ module "ecs" {
 
       load_balancers = [
         {
-          target_group_arn = module.alb_internal.target_group_arns["${k}-blue"]
-          container_name   = k
-          container_port   = s.container_port
+          target_group_arn = module.alb_internal.target_group_arns["dofs-blue"]
+          container_name   = "dofs"
+          container_port   = 8080 # TBD (Kalbe, DDD T17)
         }
       ]
 
       autoscaling = {
-        min_capacity = s.min_capacity
-        max_capacity = s.max_capacity
+        min_capacity = 2
+        max_capacity = 20
 
-        policies = merge(
-          {
-            "cpu" = {
-              predefined_metric_type = "ECSServiceAverageCPUUtilization"
-              target_value           = s.cpu_target_utilization
-              scale_out_cooldown     = 60
-              scale_in_cooldown      = 120
-            }
-          },
-          { for p, v in {
-            "memory" = {
-              predefined_metric_type = "ECSServiceAverageMemoryUtilization"
-              target_value           = s.memory_target_utilization
-              scale_out_cooldown     = 60
-              scale_in_cooldown      = 120
-            }
-          } : p => v if s.memory_target_utilization != null },
-          { for p, v in {
-            "alb-requests" = {
-              predefined_metric_type = "ALBRequestCountPerTarget"
-              target_value           = s.request_count_per_target
-              resource_label         = "${module.alb_internal.lb_arn_suffix}/${module.alb_internal.target_group_arn_suffixes["${k}-blue"]}"
-              scale_out_cooldown     = 60
-              scale_in_cooldown      = 120
-            }
-          } : p => v if s.request_count_per_target != null }
-        )
+        policies = { for p, v in {
+          "cpu" = {
+            predefined_metric_type = "ECSServiceAverageCPUUtilization"
+            target_value           = 70
+            scale_out_cooldown     = 60
+            scale_in_cooldown      = 120
+          }
+          "memory" = {
+            predefined_metric_type = "ECSServiceAverageMemoryUtilization"
+            target_value           = 80
+            scale_out_cooldown     = 60
+            scale_in_cooldown      = 120
+          }
+          "alb-requests" = {
+            predefined_metric_type = "ALBRequestCountPerTarget"
+            target_value           = null # TBD (DDD T18) - requests per target; null skips this policy
+            resource_label         = "${module.alb_internal.lb_arn_suffix}/${module.alb_internal.target_group_arn_suffixes["dofs-blue"]}"
+            scale_out_cooldown     = 60
+            scale_in_cooldown      = 120
+          }
+        } : p => v if v.target_value != null }
+      }
+    }
+    "shortenurl" = {
+      name                       = "maven-shortenurl"
+      task_definition_key        = "shortenurl"
+      desired_count              = 2
+      deployment_controller_type = "CODE_DEPLOY"
+      enable_execute_command     = true
+      propagate_tags             = "SERVICE"
+
+      health_check_grace_period_seconds = 60
+
+      launch_type = "FARGATE"
+
+      network_configuration = {
+        subnets          = module.vpc.private_app_subnet_ids
+        security_groups  = [module.sg_ecs.security_group_id]
+        assign_public_ip = false
+      }
+
+      load_balancers = [
+        {
+          target_group_arn = module.alb_internal.target_group_arns["shortenurl-blue"]
+          container_name   = "shortenurl"
+          container_port   = 8080 # TBD (Kalbe, DDD T17)
+        }
+      ]
+
+      autoscaling = {
+        min_capacity = 2
+        max_capacity = 20
+
+        policies = { for p, v in {
+          "cpu" = {
+            predefined_metric_type = "ECSServiceAverageCPUUtilization"
+            target_value           = 70
+            scale_out_cooldown     = 60
+            scale_in_cooldown      = 120
+          }
+          "memory" = {
+            predefined_metric_type = "ECSServiceAverageMemoryUtilization"
+            target_value           = 80
+            scale_out_cooldown     = 60
+            scale_in_cooldown      = 120
+          }
+          "alb-requests" = {
+            predefined_metric_type = "ALBRequestCountPerTarget"
+            target_value           = null # TBD (DDD T18) - requests per target; null skips this policy
+            resource_label         = "${module.alb_internal.lb_arn_suffix}/${module.alb_internal.target_group_arn_suffixes["shortenurl-blue"]}"
+            scale_out_cooldown     = 60
+            scale_in_cooldown      = 120
+          }
+        } : p => v if v.target_value != null }
       }
     }
   }
@@ -854,20 +772,25 @@ module "cognito" {
     "maven-api" = {
       identifier = "maven-api"
       name       = "maven-api"
-      scopes     = local.cognito_scopes
+      scopes     = {} # TBD (Kalbe, DDD T11/T12) - e.g. "dofs.write" = "Submit DoFS claims"
     }
   }
 
   clients = {
-    for k, c in local.api_clients : k => {
+    for k, scopes in {
+      "kartini"  = [] # TBD (DDD T13) - allowed scopes, e.g. ["maven-api/dofs.write"]
+      "kpoin"    = [] # TBD (DDD T13) - allowed scopes
+      "app"      = [] # TBD (DDD T13) - allowed scopes
+      "loadtest" = [] # TBD (DDD T13) - same scopes as the endpoints under test
+      } : k => {
       name                                 = "maven-${k}"
       generate_secret                      = true
-      allowed_oauth_flows_user_pool_client = length(c.scopes) > 0
-      allowed_oauth_flows                  = length(c.scopes) > 0 ? ["client_credentials"] : []
-      allowed_oauth_scopes                 = [for scope in c.scopes : "maven-api/${scope}"]
+      allowed_oauth_flows_user_pool_client = length(scopes) > 0
+      allowed_oauth_flows                  = length(scopes) > 0 ? ["client_credentials"] : []
+      allowed_oauth_scopes                 = scopes
       explicit_auth_flows                  = ["ALLOW_REFRESH_TOKEN_AUTH"]
       supported_identity_providers         = ["COGNITO"]
-      access_token_validity                = c.access_token_validity
+      access_token_validity                = 60
       enable_token_revocation              = true
 
       token_validity_units = {
@@ -902,22 +825,75 @@ module "api_gateway" {
   }
 
   methods = {
-    for k, r in local.api_routes : k => {
-      path                 = r.path
+    "dofs-root" = {
+      path                 = "/dofs" # TBD (Kalbe, DDD T11)
       http_method          = "ANY"
       authorization        = "COGNITO_USER_POOLS"
       authorizer_key       = "cognito"
-      authorization_scopes = length(local.api_scopes) > 0 ? local.api_scopes : null
+      authorization_scopes = null # TBD (DDD T11) - e.g. ["maven-api/dofs.write"]
       api_key_required     = true
-      request_parameters   = r.proxy ? { "method.request.path.proxy" = true } : null
 
       integration = {
         type                    = "HTTP_PROXY"
         integration_http_method = "ANY"
         vpc_link                = "v2"
         integration_target      = module.alb_internal.lb_arn
-        uri                     = r.proxy ? "http://${module.alb_internal.lb_dns_name}:${r.listener_port}/{proxy}" : "http://${module.alb_internal.lb_dns_name}:${r.listener_port}/"
-        request_parameters      = r.proxy ? { "integration.request.path.proxy" = "method.request.path.proxy" } : null
+        uri                     = "http://${module.alb_internal.lb_dns_name}:8081/"
+        timeout_milliseconds    = 29000
+      }
+    }
+    "dofs-proxy" = {
+      path                 = "/dofs/{proxy+}" # TBD (Kalbe, DDD T11)
+      http_method          = "ANY"
+      authorization        = "COGNITO_USER_POOLS"
+      authorizer_key       = "cognito"
+      authorization_scopes = null # TBD (DDD T11) - e.g. ["maven-api/dofs.write"]
+      api_key_required     = true
+      request_parameters   = { "method.request.path.proxy" = true }
+
+      integration = {
+        type                    = "HTTP_PROXY"
+        integration_http_method = "ANY"
+        vpc_link                = "v2"
+        integration_target      = module.alb_internal.lb_arn
+        uri                     = "http://${module.alb_internal.lb_dns_name}:8081/{proxy}"
+        request_parameters      = { "integration.request.path.proxy" = "method.request.path.proxy" }
+        timeout_milliseconds    = 29000
+      }
+    }
+    "shortenurl-root" = {
+      path                 = "/shortenurl" # TBD (Kalbe, DDD T11)
+      http_method          = "ANY"
+      authorization        = "COGNITO_USER_POOLS"
+      authorizer_key       = "cognito"
+      authorization_scopes = null # TBD (DDD T11) - e.g. ["maven-api/url.write"]
+      api_key_required     = true
+
+      integration = {
+        type                    = "HTTP_PROXY"
+        integration_http_method = "ANY"
+        vpc_link                = "v2"
+        integration_target      = module.alb_internal.lb_arn
+        uri                     = "http://${module.alb_internal.lb_dns_name}:8082/"
+        timeout_milliseconds    = 29000
+      }
+    }
+    "shortenurl-proxy" = {
+      path                 = "/shortenurl/{proxy+}" # TBD (Kalbe, DDD T11)
+      http_method          = "ANY"
+      authorization        = "COGNITO_USER_POOLS"
+      authorizer_key       = "cognito"
+      authorization_scopes = null # TBD (DDD T11) - e.g. ["maven-api/url.write"]
+      api_key_required     = true
+      request_parameters   = { "method.request.path.proxy" = true }
+
+      integration = {
+        type                    = "HTTP_PROXY"
+        integration_http_method = "ANY"
+        vpc_link                = "v2"
+        integration_target      = module.alb_internal.lb_arn
+        uri                     = "http://${module.alb_internal.lb_dns_name}:8082/{proxy}"
+        request_parameters      = { "integration.request.path.proxy" = "method.request.path.proxy" }
         timeout_milliseconds    = 29000
       }
     }
@@ -961,28 +937,48 @@ module "api_gateway" {
   }
 
   api_keys = {
-    for k, c in local.api_clients : k => {
-      name = "maven-key-${k}"
+    "kartini" = {
+      name = "maven-key-kartini"
+    }
+    "kpoin" = {
+      name = "maven-key-kpoin"
+    }
+    "app" = {
+      name = "maven-key-app"
+    }
+    "loadtest" = {
+      name = "maven-key-loadtest"
     }
   }
 
   usage_plans = {
-    for k, c in local.api_clients : k => {
-      name = "maven-plan-${k}"
-      stages = [
-        {
-          stage_key = "main"
-        }
-      ]
-      throttle_settings = c.rate_limit != null || c.burst_limit != null ? {
-        burst_limit = c.burst_limit
-        rate_limit  = c.rate_limit
-      } : null
-      quota_settings = c.quota_per_day != null ? {
-        limit  = c.quota_per_day
-        period = "DAY"
-      } : null
-      api_key_keys = [k]
+    "kartini" = {
+      name              = "maven-plan-kartini"
+      stages            = [{ stage_key = "main" }]
+      throttle_settings = null # TBD (DDD T15) - { rate_limit = <rps>, burst_limit = <burst> }
+      quota_settings    = null # TBD (DDD T15) - { limit = <requests>, period = "DAY" }
+      api_key_keys      = ["kartini"]
+    }
+    "kpoin" = {
+      name              = "maven-plan-kpoin"
+      stages            = [{ stage_key = "main" }]
+      throttle_settings = null # TBD (DDD T15) - { rate_limit = <rps>, burst_limit = <burst> }
+      quota_settings    = null # TBD (DDD T15) - { limit = <requests>, period = "DAY" }
+      api_key_keys      = ["kpoin"]
+    }
+    "app" = {
+      name              = "maven-plan-app"
+      stages            = [{ stage_key = "main" }]
+      throttle_settings = null # TBD (DDD T15) - { rate_limit = <rps>, burst_limit = <burst> }
+      quota_settings    = null # TBD (DDD T15) - { limit = <requests>, period = "DAY" }
+      api_key_keys      = ["app"]
+    }
+    "loadtest" = {
+      name              = "maven-plan-loadtest"
+      stages            = [{ stage_key = "main" }]
+      throttle_settings = null # TBD - load test target
+      quota_settings    = null
+      api_key_keys      = ["loadtest"]
     }
   }
 
@@ -1045,9 +1041,9 @@ module "waf_api" {
 # CodeBuild - one project per service (.NET build, test, push to ECR)
 module "codebuild" {
   source   = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-codebuild-v6?ref=main"
-  for_each = local.services
+  for_each = toset(["dofs", "shortenurl"])
 
-  name        = "${each.value.name}-build"
+  name        = "maven-${each.key}-build"
   description = "Build, test and push ${each.key} to ECR"
 
   source_config = {
@@ -1057,13 +1053,13 @@ module "codebuild" {
 
   environment = {
     compute_type    = "BUILD_GENERAL1_SMALL"
-    type            = local.ecs_cpu_architecture == "ARM64" ? "ARM_CONTAINER" : "LINUX_CONTAINER"
-    image           = local.ecs_cpu_architecture == "ARM64" ? "aws/codebuild/amazonlinux-aarch64-standard:3.0" : "aws/codebuild/amazonlinux-x86_64-standard:5.0"
+    type            = "LINUX_CONTAINER"                               # ARM_CONTAINER for ARM64 images
+    image           = "aws/codebuild/amazonlinux-x86_64-standard:5.0" # aws/codebuild/amazonlinux-aarch64-standard:3.0 for ARM64 images
     privileged_mode = true
 
     environment_variables = [
       { name = "AWS_ACCOUNT_ID", value = "908027374739" },
-      { name = "ECR_REPOSITORY_URI", value = module.ecr.repository_urls[each.value.repository] },
+      { name = "ECR_REPOSITORY_URI", value = module.ecr.repository_urls["maven-${each.key}"] },
       { name = "CONTAINER_NAME", value = each.key },
       { name = "ARTIFACT_BUCKET", value = module.s3_cicd.bucket_id }
     ]
@@ -1072,7 +1068,7 @@ module "codebuild" {
   encryption_key = module.kms_cmk.kms_key_arn
 
   service_role_s3_bucket_arns      = [module.s3_cicd.bucket_arn]
-  service_role_ecr_repository_arns = [module.ecr.repository_arns[each.value.repository]]
+  service_role_ecr_repository_arns = [module.ecr.repository_arns["maven-${each.key}"]]
   service_role_kms_key_arns        = [module.kms_cmk.kms_key_arn]
 
   log_group_retention_in_days = 30
@@ -1090,8 +1086,8 @@ module "codedeploy" {
   compute_platform = "ECS"
 
   deployment_groups = {
-    for k, s in local.services : k => {
-      name                   = "${s.name}-dg"
+    "dofs" = {
+      name                   = "maven-dofs-dg"
       deployment_config_name = "CodeDeployDefault.ECSAllAtOnce"
 
       blue_green = {
@@ -1103,18 +1099,18 @@ module "codedeploy" {
       ecs_services = [
         {
           cluster_name = module.ecs.cluster_name
-          service_name = module.ecs.service_names[k]
+          service_name = module.ecs.service_names["dofs"]
         }
       ]
 
       load_balancer_info = {
         target_group_pair = {
           target_group_names = [
-            module.alb_internal.target_group_names["${k}-blue"],
-            module.alb_internal.target_group_names["${k}-green"]
+            module.alb_internal.target_group_names["dofs-blue"],
+            module.alb_internal.target_group_names["dofs-green"]
           ]
-          prod_listener_arns = [module.alb_internal.listener_arns[k]]
-          test_listener_arns = s.test_listener_port != null ? [module.alb_internal.listener_arns["${k}-test"]] : []
+          prod_listener_arns = [module.alb_internal.listener_arns["dofs"]]
+          test_listener_arns = [module.alb_internal.listener_arns["dofs-test"]]
         }
       }
 
@@ -1126,8 +1122,49 @@ module "codedeploy" {
       alarm_configuration = {
         enabled = true
         alarms = [
-          module.cloudwatch_alarms.metric_alarm_names["${k}-unhealthy-hosts-blue"],
-          module.cloudwatch_alarms.metric_alarm_names["${k}-unhealthy-hosts-green"]
+          module.cloudwatch_alarms.metric_alarm_names["dofs-unhealthy-hosts-blue"],
+          module.cloudwatch_alarms.metric_alarm_names["dofs-unhealthy-hosts-green"]
+        ]
+      }
+    }
+    "shortenurl" = {
+      name                   = "maven-shortenurl-dg"
+      deployment_config_name = "CodeDeployDefault.ECSAllAtOnce"
+
+      blue_green = {
+        deployment_ready_action_on_timeout = "CONTINUE_DEPLOYMENT"
+        terminate_blue_action              = "TERMINATE"
+        termination_wait_time_in_minutes   = 5 # Time to keep the old task set for rollback
+      }
+
+      ecs_services = [
+        {
+          cluster_name = module.ecs.cluster_name
+          service_name = module.ecs.service_names["shortenurl"]
+        }
+      ]
+
+      load_balancer_info = {
+        target_group_pair = {
+          target_group_names = [
+            module.alb_internal.target_group_names["shortenurl-blue"],
+            module.alb_internal.target_group_names["shortenurl-green"]
+          ]
+          prod_listener_arns = [module.alb_internal.listener_arns["shortenurl"]]
+          test_listener_arns = [module.alb_internal.listener_arns["shortenurl-test"]]
+        }
+      }
+
+      auto_rollback = {
+        enabled = true
+        events  = ["DEPLOYMENT_FAILURE", "DEPLOYMENT_STOP_ON_ALARM"]
+      }
+
+      alarm_configuration = {
+        enabled = true
+        alarms = [
+          module.cloudwatch_alarms.metric_alarm_names["shortenurl-unhealthy-hosts-blue"],
+          module.cloudwatch_alarms.metric_alarm_names["shortenurl-unhealthy-hosts-green"]
         ]
       }
     }

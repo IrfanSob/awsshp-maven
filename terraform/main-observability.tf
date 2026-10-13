@@ -389,34 +389,56 @@ module "cloudwatch_alarms" {
   default_ok_actions    = [module.sns_notifications.topic_arn]
 
   metric_alarms = merge(
-    merge([
-      for k, s in local.services : {
-        "${k}-unhealthy-hosts-blue" = {
-          alarm_description   = "Unhealthy targets in ${k} blue target group"
-          namespace           = "AWS/ApplicationELB"
-          metric_name         = "UnHealthyHostCount"
-          dimensions          = { LoadBalancer = module.alb_internal.lb_arn_suffix, TargetGroup = module.alb_internal.target_group_arn_suffixes["${k}-blue"] }
-          statistic           = "Maximum"
-          period              = 60
-          evaluation_periods  = 3
-          comparison_operator = "GreaterThanThreshold"
-          threshold           = 0
-          treat_missing_data  = "notBreaching"
-        }
-        "${k}-unhealthy-hosts-green" = {
-          alarm_description   = "Unhealthy targets in ${k} green target group"
-          namespace           = "AWS/ApplicationELB"
-          metric_name         = "UnHealthyHostCount"
-          dimensions          = { LoadBalancer = module.alb_internal.lb_arn_suffix, TargetGroup = module.alb_internal.target_group_arn_suffixes["${k}-green"] }
-          statistic           = "Maximum"
-          period              = 60
-          evaluation_periods  = 3
-          comparison_operator = "GreaterThanThreshold"
-          threshold           = 0
-          treat_missing_data  = "notBreaching"
-        }
+    {
+      "dofs-unhealthy-hosts-blue" = {
+        alarm_description   = "Unhealthy targets in dofs blue target group"
+        namespace           = "AWS/ApplicationELB"
+        metric_name         = "UnHealthyHostCount"
+        dimensions          = { LoadBalancer = module.alb_internal.lb_arn_suffix, TargetGroup = module.alb_internal.target_group_arn_suffixes["dofs-blue"] }
+        statistic           = "Maximum"
+        period              = 60
+        evaluation_periods  = 3
+        comparison_operator = "GreaterThanThreshold"
+        threshold           = 0
+        treat_missing_data  = "notBreaching"
       }
-    ]...),
+      "dofs-unhealthy-hosts-green" = {
+        alarm_description   = "Unhealthy targets in dofs green target group"
+        namespace           = "AWS/ApplicationELB"
+        metric_name         = "UnHealthyHostCount"
+        dimensions          = { LoadBalancer = module.alb_internal.lb_arn_suffix, TargetGroup = module.alb_internal.target_group_arn_suffixes["dofs-green"] }
+        statistic           = "Maximum"
+        period              = 60
+        evaluation_periods  = 3
+        comparison_operator = "GreaterThanThreshold"
+        threshold           = 0
+        treat_missing_data  = "notBreaching"
+      }
+      "shortenurl-unhealthy-hosts-blue" = {
+        alarm_description   = "Unhealthy targets in shortenurl blue target group"
+        namespace           = "AWS/ApplicationELB"
+        metric_name         = "UnHealthyHostCount"
+        dimensions          = { LoadBalancer = module.alb_internal.lb_arn_suffix, TargetGroup = module.alb_internal.target_group_arn_suffixes["shortenurl-blue"] }
+        statistic           = "Maximum"
+        period              = 60
+        evaluation_periods  = 3
+        comparison_operator = "GreaterThanThreshold"
+        threshold           = 0
+        treat_missing_data  = "notBreaching"
+      }
+      "shortenurl-unhealthy-hosts-green" = {
+        alarm_description   = "Unhealthy targets in shortenurl green target group"
+        namespace           = "AWS/ApplicationELB"
+        metric_name         = "UnHealthyHostCount"
+        dimensions          = { LoadBalancer = module.alb_internal.lb_arn_suffix, TargetGroup = module.alb_internal.target_group_arn_suffixes["shortenurl-green"] }
+        statistic           = "Maximum"
+        period              = 60
+        evaluation_periods  = 3
+        comparison_operator = "GreaterThanThreshold"
+        threshold           = 0
+        treat_missing_data  = "notBreaching"
+      }
+    },
     {
       "api-latency-p95" = {
         alarm_description   = "API Gateway p95 latency above 500 ms"
@@ -551,7 +573,7 @@ module "cloudwatch_alarms" {
         threshold           = 1
         treat_missing_data  = "breaching"
       }
-    } : k => v if local.vpn_enabled },
+    } : k => v if length(module.vpn_onprem) > 0 },
     { for k, v in {
       "loadtest-status-check" = {
         alarm_description   = "k6 load test instance status check failed"

@@ -1,13 +1,3 @@
-locals {
-  onprem_cidrs         = [] # TBD (Kalbe, DDD T2) - on-premises CIDRs behind the VPN
-  migration_host_cidrs = [] # TBD (Kalbe, DDD T6) - Kalbe migration host IP as /32
-  customer_gateway_ip  = "" # TBD (Kalbe, DDD T2) - static public IP of the Kalbe VPN device; empty skips the VPN
-
-  onprem_access_enabled = length(local.onprem_cidrs) > 0
-  migration_access      = length(local.migration_host_cidrs) > 0
-  vpn_enabled           = local.customer_gateway_ip != ""
-}
-
 # VPC
 module "vpc" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc?ref=main"
@@ -172,22 +162,22 @@ module "vpc_flow_logs" {
   }
 }
 
-# Site-to-Site VPN (toggle: local.customer_gateway_ip)
+# Site-to-Site VPN (toggle: count)
 module "vpn_onprem" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpn-site-to-site?ref=main"
-  count  = local.vpn_enabled ? 1 : 0
+  count  = 0 # Set to 1 once the Kalbe VPN device details are confirmed (DDD T2/T3)
 
   name = "maven-vpn-onprem"
 
   create_customer_gateway     = true
-  customer_gateway_ip_address = local.customer_gateway_ip
+  customer_gateway_ip_address = ""    # TBD (Kalbe, DDD T2) - static public IP of the Kalbe VPN device
   customer_gateway_bgp_asn    = 65000 # TBD (Kalbe, DDD T3) - on-premises ASN when BGP is used
 
   create_vpn_gateway = true
   vpn_gateway_vpc_id = module.vpc.vpc_id
 
   static_routes_only = true # TBD (Kalbe, DDD T3) - false for BGP
-  static_routes      = local.onprem_cidrs
+  static_routes      = []   # TBD (Kalbe, DDD T2) - on-premises CIDRs behind the VPN
 
   tunnel1_ike_versions = ["ikev2"]
   tunnel2_ike_versions = ["ikev2"]
@@ -215,11 +205,17 @@ module "sg_vpc_link" {
   inbound_rules = []
 
   outbound_rules = [
-    for k, s in local.services : {
-      port        = s.listener_port
+    {
+      port        = 8081
       protocol    = "tcp"
       cidr_blocks = [module.vpc.vpc_cidr_block]
-      description = "To internal ALB listener ${k}"
+      description = "To internal ALB listener dofs"
+    },
+    {
+      port        = 8082
+      protocol    = "tcp"
+      cidr_blocks = [module.vpc.vpc_cidr_block]
+      description = "To internal ALB listener shortenurl"
     }
   ]
 
@@ -238,37 +234,57 @@ module "sg_alb" {
 
   inbound_rules = concat(
     [
-      for k, s in local.services : {
-        port                     = s.listener_port
+      {
+        port                     = 8081
         protocol                 = "tcp"
         source_security_group_id = module.sg_vpc_link.security_group_id
-        description              = "Production listener ${k} from API Gateway VPC link"
-      }
-    ],
-    [
-      for k, s in local.services : {
-        port        = s.test_listener_port
+        description              = "Listener dofs from API Gateway VPC link"
+      },
+      {
+        port                     = 8082
+        protocol                 = "tcp"
+        source_security_group_id = module.sg_vpc_link.security_group_id
+        description              = "Listener shortenurl from API Gateway VPC link"
+      },
+      {
+        port        = 9081
         protocol    = "tcp"
         cidr_blocks = [module.vpc.vpc_cidr_block]
-        description = "CodeDeploy test listener ${k} from the VPC"
-      } if s.test_listener_port != null
-    ],
-    [
-      for k, s in local.services : {
-        port        = s.listener_port
+        description = "CodeDeploy test listener dofs from the VPC"
+      },
+      {
+        port        = 9082
         protocol    = "tcp"
-        cidr_blocks = local.onprem_cidrs
-        description = "Listener ${k} from on-premises over VPN (internal testing)"
-      } if local.onprem_access_enabled
-    ],
-    [
-      for k, s in local.services : {
-        port                     = s.listener_port
+        cidr_blocks = [module.vpc.vpc_cidr_block]
+        description = "CodeDeploy test listener shortenurl from the VPC"
+      },
+      {
+        port                     = 8081
         protocol                 = "tcp"
         source_security_group_id = module.sg_loadtest.security_group_id
-        description              = "Listener ${k} from k6 load test"
+        description              = "Listener dofs from k6 load test"
+      },
+      {
+        port                     = 8082
+        protocol                 = "tcp"
+        source_security_group_id = module.sg_loadtest.security_group_id
+        description              = "Listener shortenurl from k6 load test"
       }
-    ]
+    ],
+    [for r in [
+      {
+        port        = 8081
+        protocol    = "tcp"
+        cidr_blocks = [] # TBD (Kalbe, DDD T2) - on-premises CIDRs for internal testing; empty skips this rule
+        description = "Listener dofs from on-premises over VPN"
+      },
+      {
+        port        = 8082
+        protocol    = "tcp"
+        cidr_blocks = [] # TBD (Kalbe, DDD T2) - on-premises CIDRs for internal testing; empty skips this rule
+        description = "Listener shortenurl from on-premises over VPN"
+      }
+    ] : r if length(r.cidr_blocks) > 0]
   )
 
   outbound_rules = [
@@ -293,24 +309,20 @@ module "sg_ecs" {
   description = "Security Group for ECS Fargate tasks"
   vpc_id      = module.vpc.vpc_id
 
-  inbound_rules = concat(
-    [
-      for k, s in local.services : {
-        port                     = s.container_port
-        protocol                 = "tcp"
-        source_security_group_id = module.sg_alb.security_group_id
-        description              = "Application ${k} from ALB"
-      }
-    ],
-    [
-      for k, s in local.services : {
-        port                     = s.container_port
-        protocol                 = "tcp"
-        source_security_group_id = module.sg_monitoring.security_group_id
-        description              = "Prometheus scrape ${k}"
-      }
-    ]
-  )
+  inbound_rules = [
+    {
+      port                     = 8080 # TBD (Kalbe, DDD T17) - container port of all services
+      protocol                 = "tcp"
+      source_security_group_id = module.sg_alb.security_group_id
+      description              = "Application traffic and health check from ALB"
+    },
+    {
+      port                     = 8080 # TBD (Kalbe, DDD T6) - /metrics port
+      protocol                 = "tcp"
+      source_security_group_id = module.sg_monitoring.security_group_id
+      description              = "Prometheus scrape of /metrics"
+    }
+  ]
 
   outbound_rules = [
     {
@@ -343,16 +355,14 @@ module "sg_aurora" {
         description              = "PostgreSQL from ECS tasks"
       }
     ],
-    [
-      for r in [
-        {
-          port        = 5432
-          protocol    = "tcp"
-          cidr_blocks = local.migration_host_cidrs
-          description = "pg_restore from Kalbe migration host (remove after migration)"
-        }
-      ] : r if local.migration_access
-    ]
+    [for r in [
+      {
+        port        = 5432
+        protocol    = "tcp"
+        cidr_blocks = [] # TBD (Kalbe, DDD T6) - migration host IP as /32; empty skips this rule
+        description = "pg_restore from Kalbe migration host (remove after migration)"
+      }
+    ] : r if length(r.cidr_blocks) > 0]
   )
 
   outbound_rules = []
@@ -399,22 +409,22 @@ module "sg_monitoring" {
       {
         port        = 3000
         protocol    = "tcp"
-        cidr_blocks = local.onprem_cidrs
+        cidr_blocks = [] # TBD (Kalbe, DDD T6) - on-premises CIDRs; empty skips this rule
         description = "Grafana web UI from on-premises over VPN"
       },
       {
         port        = 9090
         protocol    = "tcp"
-        cidr_blocks = local.onprem_cidrs
+        cidr_blocks = [] # TBD (Kalbe, DDD T6) - on-premises CIDRs; empty skips this rule
         description = "Prometheus web UI from on-premises over VPN"
       },
       {
         port        = -1
         protocol    = "icmp"
-        cidr_blocks = local.onprem_cidrs
+        cidr_blocks = [] # TBD (Kalbe, DDD T6) - on-premises CIDRs; empty skips this rule
         description = "Ping from on-premises for VPN connectivity test"
       }
-    ] : r if local.onprem_access_enabled
+    ] : r if length(r.cidr_blocks) > 0
   ]
 
   outbound_rules = [
@@ -468,10 +478,10 @@ module "sg_datasync_agent" {
       {
         port        = 80
         protocol    = "tcp"
-        cidr_blocks = local.migration_host_cidrs
+        cidr_blocks = [] # TBD (Kalbe, DDD T6) - migration host IP as /32; empty skips this rule
         description = "Agent activation from Kalbe migration host (remove after activation)"
       }
-    ] : r if local.migration_access
+    ] : r if length(r.cidr_blocks) > 0
   ]
 
   outbound_rules = [

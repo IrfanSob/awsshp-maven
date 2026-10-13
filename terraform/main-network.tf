@@ -2,25 +2,17 @@
 module "vpc" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc?ref=main"
 
-  vpc_name = "maven-vpc"
-  vpc_cidr = "10.100.0.0/16"
+  vpc_name = "shpdev-maven"
+  vpc_cidr = "10.177.207.0/24"
   azs      = ["ap-southeast-3a", "ap-southeast-3b", "ap-southeast-3c"]
 
-  public_subnets      = ["10.100.0.0/24", "10.100.1.0/24", "10.100.2.0/24"]
-  public_subnet_names = ["public-subnet-3a", "public-subnet-3b", "public-subnet-3c"]
+  public_subnets      = ["10.177.207.192/27", "10.177.207.224/28", "10.177.207.240/28"]
+  public_subnet_names = ["shpdev-maven-public-3a", "shpdev-maven-public-3b", "shpdev-maven-public-3c"]
   public_subnet_azs   = ["ap-southeast-3a", "ap-southeast-3b", "ap-southeast-3c"]
 
-  other_private_subnets_first      = ["10.100.10.0/24", "10.100.11.0/24", "10.100.12.0/24"]
-  other_private_subnet_first_names = ["private-subnet-lb-3a", "private-subnet-lb-3b", "private-subnet-lb-3c"]
-  other_private_subnet_first_azs   = ["ap-southeast-3a", "ap-southeast-3b", "ap-southeast-3c"]
-
-  private_app_subnets      = ["10.100.20.0/22", "10.100.24.0/22", "10.100.28.0/22"]
-  private_app_subnet_names = ["private-subnet-app-3a", "private-subnet-app-3b", "private-subnet-app-3c"]
+  private_app_subnets      = ["10.177.207.0/26", "10.177.207.64/26", "10.177.207.128/26"]
+  private_app_subnet_names = ["shpdev-maven-private-3a", "shpdev-maven-private-3b", "shpdev-maven-private-3c"]
   private_app_subnet_azs   = ["ap-southeast-3a", "ap-southeast-3b", "ap-southeast-3c"]
-
-  private_db_subnets      = ["10.100.40.0/24", "10.100.41.0/24", "10.100.42.0/24"]
-  private_db_subnet_names = ["private-subnet-data-3a", "private-subnet-data-3b", "private-subnet-data-3c"]
-  private_db_subnet_azs   = ["ap-southeast-3a", "ap-southeast-3b", "ap-southeast-3c"]
 
   enable_igw         = true
   enable_nat_gateway = true
@@ -31,12 +23,12 @@ module "vpc" {
   }
 }
 
-# VPC Route Tables - Public and App (Internet Gateway and NAT routes)
+# VPC Route Tables
 module "vpc_route_tables" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc/aws-vpc-route-table?ref=main"
 
   vpc_id   = module.vpc.vpc_id
-  vpc_name = "maven-vpc"
+  vpc_name = "shpdev-maven"
 
   public_subnets      = module.vpc.public_subnet_ids
   enable_public_route = true
@@ -45,28 +37,10 @@ module "vpc_route_tables" {
   private_app_subnets = module.vpc.private_app_subnet_ids
 
   public_route_table_name      = "Public-RT"
-  private_app_route_table_name = "Private-App-RT"
+  private_app_route_table_name = "Private-RT"
 
   enable_nat_route = true
   nat_gateway_ids  = module.vpc.nat_gateway_ids
-
-  tags = {
-    "Resource" = "VPC"
-  }
-}
-
-# VPC Route Tables - LB and Data (no internet route)
-module "vpc_route_tables_isolated" {
-  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc/aws-vpc-route-table?ref=main"
-
-  vpc_id   = module.vpc.vpc_id
-  vpc_name = "maven-vpc"
-
-  other_private_subnets_first = module.vpc.other_private_subnet_first_ids
-  private_db_subnets          = module.vpc.private_db_subnet_ids
-
-  other_private_subnets_first_route_table_name = "Private-ALB-RT"
-  private_db_route_table_name                  = "Private-Data-RT"
 
   tags = {
     "Resource" = "VPC"
@@ -80,12 +54,10 @@ module "s3_gateway_endpoint" {
   vpc_id        = module.vpc.vpc_id
   region        = var.region
   endpoint_type = "Gateway"
-  endpoint_name = "maven-s3-gateway-endpoint"
+  endpoint_name = "shpdev-maven-s3-gateway-endpoint"
 
   route_table_ids = [
-    module.vpc_route_tables_isolated.other_private_subnets_first_route_table_id,
-    module.vpc_route_tables.private_app_route_table_id,
-    module.vpc_route_tables_isolated.private_db_route_table_id
+    module.vpc_route_tables.private_app_route_table_id
   ]
 
   tags = {
@@ -98,9 +70,9 @@ module "vpce_datasync" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc-endpoint/interface-endpoints?ref=main"
   count  = var.create_datasync_agent_instance ? 1 : 0
 
-  name_prefix                = "maven-datasync"
+  name_prefix                = "shpdev-maven-datasync"
   vpc_id                     = module.vpc.vpc_id
-  security_group_name        = "maven-vpce-datasync-sg"
+  security_group_name        = "shpdev-maven-vpce-datasync-sg"
   security_group_description = "Security Group for the DataSync interface endpoint"
 
   security_group_ingress_rules = [
@@ -129,7 +101,7 @@ module "vpce_datasync" {
 
   interface_endpoints = {
     "datasync" = {
-      name                = "maven-datasync-endpoint"
+      name                = "shpdev-maven-datasync-endpoint"
       service_name        = "com.amazonaws.${var.region}.datasync"
       subnet_ids          = [module.vpc.private_app_subnet_ids[0]]
       private_dns_enabled = true
@@ -152,8 +124,8 @@ module "vpc_flow_logs" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc-flow-logs?ref=main"
 
   vpc_id         = module.vpc.vpc_id
-  log_group_name = "/aws/vpc/maven-flow-logs"
-  flow_log_name  = "maven-vpc-flow-log"
+  log_group_name = "/aws/vpc/shpdev-maven-flow-logs"
+  flow_log_name  = "shpdev-maven-vpc-flow-log"
   traffic_type   = "ALL"
   retention_days = 30 # Flow log retention
 
@@ -165,13 +137,14 @@ module "vpc_flow_logs" {
 # Site-to-Site VPN (toggle: count)
 module "vpn_onprem" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpn-site-to-site?ref=main"
-  count  = 0 # Set to 1 once the Kalbe VPN device details are confirmed (DDD T2/T3)
+  count  = 1 # Set to 0 to skip the Site-to-Site VPN
 
-  name = "maven-vpn-onprem"
+  name = "shpdev-maven-vpn-onprem"
 
-  create_customer_gateway     = true
-  customer_gateway_ip_address = ""    # TBD (Kalbe, DDD T2) - static public IP of the Kalbe VPN device
-  customer_gateway_bgp_asn    = 65000 # TBD (Kalbe, DDD T3) - on-premises ASN when BGP is used
+  create_customer_gateway      = true
+  customer_gateway_device_name = "KN-Network"
+  customer_gateway_ip_address  = "103.78.44.2"
+  customer_gateway_bgp_asn     = 65000 # TBD (Kalbe, DDD T3) - on-premises ASN when BGP is used
 
   create_vpn_gateway = true
   vpn_gateway_vpc_id = module.vpc.vpc_id
@@ -183,9 +156,7 @@ module "vpn_onprem" {
   tunnel2_ike_versions = ["ikev2"]
 
   propagation_route_tables = {
-    "alb"  = module.vpc_route_tables_isolated.other_private_subnets_first_route_table_id
-    "app"  = module.vpc_route_tables.private_app_route_table_id
-    "data" = module.vpc_route_tables_isolated.private_db_route_table_id
+    "private" = module.vpc_route_tables.private_app_route_table_id
   }
 
   tags = {
@@ -198,7 +169,7 @@ module "vpn_onprem" {
 module "sg_vpc_link" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "maven-vpclink-sg"
+  name        = "shpdev-maven-vpclink-sg"
   description = "Security Group for the API Gateway VPC link to the internal ALB"
   vpc_id      = module.vpc.vpc_id
 
@@ -206,16 +177,16 @@ module "sg_vpc_link" {
 
   outbound_rules = [
     {
-      port        = 8081
+      port        = 8443
       protocol    = "tcp"
       cidr_blocks = [module.vpc.vpc_cidr_block]
-      description = "To internal ALB listener dofs"
+      description = "To internal ALB HTTPS listener dofs"
     },
     {
-      port        = 8082
+      port        = 8444
       protocol    = "tcp"
       cidr_blocks = [module.vpc.vpc_cidr_block]
-      description = "To internal ALB listener shortenurl"
+      description = "To internal ALB HTTPS listener shortenurl"
     }
   ]
 
@@ -228,44 +199,44 @@ module "sg_vpc_link" {
 module "sg_alb" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "maven-alb-sg"
+  name        = "shpdev-maven-alb-sg"
   description = "Security Group for the internal Application Load Balancer"
   vpc_id      = module.vpc.vpc_id
 
   inbound_rules = concat(
     [
       {
-        port                     = 8081
+        port                     = 8443
         protocol                 = "tcp"
         source_security_group_id = module.sg_vpc_link.security_group_id
         description              = "Listener dofs from API Gateway VPC link"
       },
       {
-        port                     = 8082
+        port                     = 8444
         protocol                 = "tcp"
         source_security_group_id = module.sg_vpc_link.security_group_id
         description              = "Listener shortenurl from API Gateway VPC link"
       },
       {
-        port        = 9081
+        port        = 9443
         protocol    = "tcp"
         cidr_blocks = [module.vpc.vpc_cidr_block]
         description = "CodeDeploy test listener dofs from the VPC"
       },
       {
-        port        = 9082
+        port        = 9444
         protocol    = "tcp"
         cidr_blocks = [module.vpc.vpc_cidr_block]
         description = "CodeDeploy test listener shortenurl from the VPC"
       },
       {
-        port                     = 8081
+        port                     = 8443
         protocol                 = "tcp"
         source_security_group_id = module.sg_loadtest.security_group_id
         description              = "Listener dofs from k6 load test"
       },
       {
-        port                     = 8082
+        port                     = 8444
         protocol                 = "tcp"
         source_security_group_id = module.sg_loadtest.security_group_id
         description              = "Listener shortenurl from k6 load test"
@@ -273,16 +244,22 @@ module "sg_alb" {
     ],
     [for r in [
       {
-        port        = 8081
+        port        = 8443
         protocol    = "tcp"
-        cidr_blocks = [] # TBD (Kalbe, DDD T2) - on-premises CIDRs for internal testing; empty skips this rule
+        cidr_blocks = ["10.0.0.0/8"] # Kalbe network (DDD T6)
         description = "Listener dofs from on-premises over VPN"
       },
       {
-        port        = 8082
+        port        = 8444
         protocol    = "tcp"
-        cidr_blocks = [] # TBD (Kalbe, DDD T2) - on-premises CIDRs for internal testing; empty skips this rule
+        cidr_blocks = ["10.0.0.0/8"] # Kalbe network (DDD T6)
         description = "Listener shortenurl from on-premises over VPN"
+      },
+      {
+        port        = 80
+        protocol    = "tcp"
+        cidr_blocks = ["10.0.0.0/8"] # Kalbe network (DDD T6)
+        description = "Web HTTP port from Kalbe network"
       }
     ] : r if length(r.cidr_blocks) > 0]
   )
@@ -305,22 +282,34 @@ module "sg_alb" {
 module "sg_ecs" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "maven-ecs-sg"
+  name        = "shpdev-maven-ecs-sg"
   description = "Security Group for ECS Fargate tasks"
   vpc_id      = module.vpc.vpc_id
 
   inbound_rules = [
     {
-      port                     = 8080 # TBD (Kalbe, DDD T17) - container port of all services
+      port                     = 80
       protocol                 = "tcp"
       source_security_group_id = module.sg_alb.security_group_id
-      description              = "Application traffic and health check from ALB"
+      description              = "Application traffic and health check from ALB (container port, DDD T17)"
     },
     {
-      port                     = 8080 # TBD (Kalbe, DDD T6) - /metrics port
+      port                     = 8080
+      protocol                 = "tcp"
+      source_security_group_id = module.sg_alb.security_group_id
+      description              = "Application traffic and health check from ALB (DDD T6)"
+    },
+    {
+      port                     = 80
       protocol                 = "tcp"
       source_security_group_id = module.sg_monitoring.security_group_id
-      description              = "Prometheus scrape of /metrics"
+      description              = "Prometheus scrape of /metrics (container port, DDD T17)"
+    },
+    {
+      port                     = 8080
+      protocol                 = "tcp"
+      source_security_group_id = module.sg_monitoring.security_group_id
+      description              = "Prometheus scrape of /metrics (DDD T6)"
     }
   ]
 
@@ -342,7 +331,7 @@ module "sg_ecs" {
 module "sg_aurora" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "maven-aurora-sg"
+  name        = "shpdev-maven-aurora-sg"
   description = "Security Group for Aurora PostgreSQL"
   vpc_id      = module.vpc.vpc_id
 
@@ -359,7 +348,7 @@ module "sg_aurora" {
       {
         port        = 5432
         protocol    = "tcp"
-        cidr_blocks = [] # TBD (Kalbe, DDD T6) - migration host IP as /32; empty skips this rule
+        cidr_blocks = ["10.0.0.0/8"] # Kalbe migration host (DDD T6); narrow to the host /32 when known
         description = "pg_restore from Kalbe migration host (remove after migration)"
       }
     ] : r if length(r.cidr_blocks) > 0]
@@ -376,7 +365,7 @@ module "sg_aurora" {
 module "sg_valkey" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "maven-valkey-sg"
+  name        = "shpdev-maven-valkey-sg"
   description = "Security Group for ElastiCache Valkey"
   vpc_id      = module.vpc.vpc_id
 
@@ -400,7 +389,7 @@ module "sg_valkey" {
 module "sg_monitoring" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "maven-monitoring-sg"
+  name        = "shpdev-maven-monitoring-sg"
   description = "Security Group for the Prometheus and Grafana instance"
   vpc_id      = module.vpc.vpc_id
 
@@ -409,19 +398,19 @@ module "sg_monitoring" {
       {
         port        = 3000
         protocol    = "tcp"
-        cidr_blocks = [] # TBD (Kalbe, DDD T6) - on-premises CIDRs; empty skips this rule
+        cidr_blocks = ["10.0.0.0/8"] # Kalbe network (DDD T6)
         description = "Grafana web UI from on-premises over VPN"
       },
       {
         port        = 9090
         protocol    = "tcp"
-        cidr_blocks = [] # TBD (Kalbe, DDD T6) - on-premises CIDRs; empty skips this rule
+        cidr_blocks = ["10.0.0.0/8"] # Kalbe network (DDD T6)
         description = "Prometheus web UI from on-premises over VPN"
       },
       {
         port        = -1
         protocol    = "icmp"
-        cidr_blocks = [] # TBD (Kalbe, DDD T6) - on-premises CIDRs; empty skips this rule
+        cidr_blocks = ["10.0.0.0/8"] # Kalbe network (DDD T6)
         description = "Ping from on-premises for VPN connectivity test"
       }
     ] : r if length(r.cidr_blocks) > 0
@@ -445,7 +434,7 @@ module "sg_monitoring" {
 module "sg_loadtest" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "maven-loadtest-sg"
+  name        = "shpdev-maven-loadtest-sg"
   description = "Security Group for the k6 load test instance"
   vpc_id      = module.vpc.vpc_id
 
@@ -469,7 +458,7 @@ module "sg_loadtest" {
 module "sg_datasync_agent" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "maven-datasync-agent-sg"
+  name        = "shpdev-maven-datasync-agent-sg"
   description = "Security Group for the DataSync agent instance"
   vpc_id      = module.vpc.vpc_id
 
@@ -478,7 +467,7 @@ module "sg_datasync_agent" {
       {
         port        = 80
         protocol    = "tcp"
-        cidr_blocks = [] # TBD (Kalbe, DDD T6) - migration host IP as /32; empty skips this rule
+        cidr_blocks = ["10.0.0.0/8"] # Kalbe migration host (DDD T6); narrow to the host /32 when known
         description = "Agent activation from Kalbe migration host (remove after activation)"
       }
     ] : r if length(r.cidr_blocks) > 0

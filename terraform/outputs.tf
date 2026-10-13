@@ -46,6 +46,22 @@ output "api_invoke_url" {
   value       = module.api_gateway.stage_invoke_urls["main"]
 }
 
+# DNS records for Kalbe (ACM validation and API custom domain)
+output "acm_validation_records" {
+  description = "CNAME records Kalbe adds to kalbenutritionals.web.id to validate the ACM certificate"
+  value       = module.acm_kalbe.domain_validation_options
+}
+
+output "api_custom_domain_target" {
+  description = "Target of the CNAME record for api-mavendofs.kalbenutritionals.web.id"
+  value       = module.api_gateway.custom_domain_regional_domain_name
+}
+
+output "alb_internal_dns_name" {
+  description = "Target of the CNAME record for shpdev-maven-alb.kalbenutritionals.web.id (on-premises access)"
+  value       = module.alb_internal.lb_dns_name
+}
+
 output "api_key_values" {
   description = "API keys per external system (x-api-key header)"
   value       = module.api_gateway.api_key_values
@@ -95,7 +111,7 @@ output "cicd_services" {
       ecr_repository_url          = module.ecr.repository_urls["maven-${k}"]
       task_definition_family      = "maven-${k}"
       container_name              = k
-      container_port              = 8080 # TBD (Kalbe, DDD T17) - must match the task definition
+      container_port              = 80
     }
   }
 }

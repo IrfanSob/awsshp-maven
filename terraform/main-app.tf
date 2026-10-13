@@ -5,8 +5,8 @@ module "kms_cmk" {
   description             = "KMS CMK for the Maven POC"
   deletion_window_in_days = 7
   enable_key_rotation     = true
-  key_name                = "cmk-maven-908027374739"
-  key_alias               = "cmk-maven-908027374739"
+  key_name                = "cmk-shpdev-maven-908027374739"
+  key_alias               = "cmk-shpdev-maven-908027374739"
 
   additional_service_principals = ["events.amazonaws.com", "cloudwatch.amazonaws.com"]
 
@@ -16,11 +16,11 @@ module "kms_cmk" {
 }
 
 # IAM GROUPS
-# Administrator
-module "iam_group_administrator" {
+# superadmin
+module "iam_group_superadmin" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-iam-user-group?ref=main"
 
-  group_name = "Administrator"
+  group_name = "superadmin"
 
   managed_policy_arns = [
     "arn:aws:iam::aws:policy/AdministratorAccess"
@@ -89,25 +89,30 @@ module "iam_group_administrator" {
     }
   }
 
-  users = {} # TBD (DDD T26) - user name = {}
+  users = {
+    "sob.irfan"  = {}
+    "hid.syarif" = {}
+  }
 
   tags = {
     "Resource" = "IAM"
   }
 }
 
-# ReadOnly
-module "iam_group_readonly" {
+# dbadmin
+module "iam_group_dbadmin" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-iam-user-group?ref=main"
 
-  group_name = "ReadOnly"
+  group_name = "dbadmin"
 
   managed_policy_arns = [
-    "arn:aws:iam::aws:policy/ReadOnlyAccess",
-    module.iam_group_administrator.customer_managed_policy_arns["Force_MFA"]
+    "arn:aws:iam::aws:policy/job-function/DatabaseAdministrator",
+    module.iam_group_superadmin.customer_managed_policy_arns["Force_MFA"]
   ]
 
-  users = {} # TBD (DDD T26) - user name = {}
+  users = {
+    "val.novaldi" = {}
+  }
 
   tags = {
     "Resource" = "IAM"
@@ -171,7 +176,7 @@ module "secrets" {
       }
     }
     "cognito-app" = {
-      name        = "cognito/maven-app"
+      name        = "cognito/shpdev-maven-app"
       description = "Cognito app client credential of the Maven application"
     }
   }
@@ -195,7 +200,7 @@ module "secrets" {
 module "aurora" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-rds-aurora-v6?ref=main"
 
-  cluster_identifier = "maven-db"
+  cluster_identifier = "shpdev-maven-db"
   engine             = "aurora-postgresql"
   engine_version     = null # TBD (Kalbe, DDD T19) - same or newer major version than on-premises PostgreSQL
   database_name      = null # TBD (Kalbe, DDD T19) - initial database name
@@ -204,7 +209,7 @@ module "aurora" {
   manage_master_user_password   = true
   master_user_secret_kms_key_id = module.kms_cmk.kms_key_arn
 
-  subnet_ids             = module.vpc.private_db_subnet_ids
+  subnet_ids             = module.vpc.private_app_subnet_ids
   vpc_security_group_ids = [module.sg_aurora.security_group_id]
 
   storage_encrypted = true
@@ -244,13 +249,13 @@ module "aurora" {
 module "valkey" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-elasticache?ref=main"
 
-  name           = "maven-valkey"
+  name           = "shpdev-maven-valkey"
   description    = "Maven cache (Valkey)"
   engine         = "valkey"
   engine_version = null # TBD (Kalbe, DDD T20) - null uses the latest version
   node_type      = "cache.m6g.large"
 
-  subnet_ids         = module.vpc.private_db_subnet_ids
+  subnet_ids         = module.vpc.private_app_subnet_ids
   security_group_ids = [module.sg_valkey.security_group_id]
 
   num_cache_clusters         = 1
@@ -282,7 +287,7 @@ module "valkey" {
 
 # CloudWatch Log Group - Valkey Slow Log
 resource "aws_cloudwatch_log_group" "valkey_slow_log" {
-  name              = "/elasticache/maven-valkey/slow-log"
+  name              = "/elasticache/shpdev-maven-valkey/slow-log"
   retention_in_days = 30 # Slow log retention
 
   tags = {
@@ -294,7 +299,7 @@ resource "aws_cloudwatch_log_group" "valkey_slow_log" {
 module "s3_assets" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-s3-bucket?ref=main"
 
-  bucket_name       = "maven-asset-908027374739"
+  bucket_name       = "shpdev-maven"
   versioning_status = "Disabled"
 
   enable_server_side_encryption = true
@@ -313,7 +318,7 @@ module "s3_assets" {
 module "s3_cicd" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-s3-bucket?ref=main"
 
-  bucket_name       = "maven-cicd-artifacts-908027374739"
+  bucket_name       = "shpdev-maven-cicd-artifacts-908027374739"
   versioning_status = "Enabled"
 
   enable_server_side_encryption = true
@@ -365,17 +370,30 @@ module "ecr" {
   }
 }
 
+# ACM Certificate (DNS validation records are created by Kalbe)
+module "acm_kalbe" {
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-acm-certificate?ref=main"
+
+  domain_name               = "kalbenutritionals.web.id"
+  subject_alternative_names = ["*.kalbenutritionals.web.id"]
+  validation_method         = "DNS"
+
+  tags = {
+    "Resource" = "ACM"
+  }
+}
+
 # Internal ALB
 module "alb_internal" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-load-balancer?ref=main"
 
-  name               = "maven-alb-internal"
+  name               = "shpdev-maven-alb-internal"
   load_balancer_type = "application"
   internal           = true
   ip_address_type    = "ipv4"
 
   vpc_id             = module.vpc.vpc_id
-  subnets            = module.vpc.other_private_subnet_first_ids
+  subnets            = module.vpc.private_app_subnet_ids
   security_group_ids = [module.sg_alb.security_group_id]
 
   enable_deletion_protection = false
@@ -391,7 +409,7 @@ module "alb_internal" {
   target_groups = {
     "dofs-blue" = {
       name                 = "tg-maven-dofs-blue"
-      port                 = 8080 # TBD (Kalbe, DDD T17) - dofs container port
+      port                 = 80
       protocol             = "HTTP"
       target_type          = "ip"
       deregistration_delay = 30
@@ -406,7 +424,7 @@ module "alb_internal" {
     }
     "dofs-green" = {
       name                 = "tg-maven-dofs-green"
-      port                 = 8080 # TBD (Kalbe, DDD T17) - dofs container port
+      port                 = 80
       protocol             = "HTTP"
       target_type          = "ip"
       deregistration_delay = 30
@@ -421,7 +439,7 @@ module "alb_internal" {
     }
     "shortenurl-blue" = {
       name                 = "tg-maven-shortenurl-blue"
-      port                 = 8080 # TBD (Kalbe, DDD T17) - shortenurl container port
+      port                 = 80
       protocol             = "HTTP"
       target_type          = "ip"
       deregistration_delay = 30
@@ -436,7 +454,7 @@ module "alb_internal" {
     }
     "shortenurl-green" = {
       name                 = "tg-maven-shortenurl-green"
-      port                 = 8080 # TBD (Kalbe, DDD T17) - shortenurl container port
+      port                 = 80
       protocol             = "HTTP"
       target_type          = "ip"
       deregistration_delay = 30
@@ -453,29 +471,33 @@ module "alb_internal" {
 
   listeners = {
     "dofs" = {
-      port                          = 8081
-      protocol                      = "HTTP"
+      port                          = 8443
+      protocol                      = "HTTPS"
+      certificate_arn               = module.acm_kalbe.certificate_arn
       action_type                   = "forward"
       target_group_key              = "dofs-blue"
       ignore_default_action_changes = true
     }
     "dofs-test" = {
-      port                          = 9081
-      protocol                      = "HTTP"
+      port                          = 9443
+      protocol                      = "HTTPS"
+      certificate_arn               = module.acm_kalbe.certificate_arn
       action_type                   = "forward"
       target_group_key              = "dofs-green"
       ignore_default_action_changes = true
     }
     "shortenurl" = {
-      port                          = 8082
-      protocol                      = "HTTP"
+      port                          = 8444
+      protocol                      = "HTTPS"
+      certificate_arn               = module.acm_kalbe.certificate_arn
       action_type                   = "forward"
       target_group_key              = "shortenurl-blue"
       ignore_default_action_changes = true
     }
     "shortenurl-test" = {
-      port                          = 9082
-      protocol                      = "HTTP"
+      port                          = 9444
+      protocol                      = "HTTPS"
+      certificate_arn               = module.acm_kalbe.certificate_arn
       action_type                   = "forward"
       target_group_key              = "shortenurl-green"
       ignore_default_action_changes = true
@@ -487,11 +509,11 @@ module "alb_internal" {
   }
 }
 
-# ECS Cluster (Fargate) - third service maven-backend-3 is TBD (Kalbe, DDD T17)
+# ECS Cluster (Fargate) - third service maven-backend-3 is TBD (Kalbe, DDD T17 name and API path)
 module "ecs" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ecs?ref=main"
 
-  cluster_name       = "maven-cluster"
+  cluster_name       = "shpdev-maven-cluster"
   container_insights = "disabled"
 
   create_service_linked_role = true
@@ -584,7 +606,7 @@ module "ecs" {
           portMappings = [
             {
               name          = "dofs-http"
-              containerPort = 8080 # TBD (Kalbe, DDD T17)
+              containerPort = 80
               protocol      = "tcp"
             }
           ]
@@ -619,7 +641,7 @@ module "ecs" {
           portMappings = [
             {
               name          = "shortenurl-http"
-              containerPort = 8080 # TBD (Kalbe, DDD T17)
+              containerPort = 80
               protocol      = "tcp"
             }
           ]
@@ -666,7 +688,7 @@ module "ecs" {
         {
           target_group_arn = module.alb_internal.target_group_arns["dofs-blue"]
           container_name   = "dofs"
-          container_port   = 8080 # TBD (Kalbe, DDD T17)
+          container_port   = 80
         }
       ]
 
@@ -679,20 +701,20 @@ module "ecs" {
             predefined_metric_type = "ECSServiceAverageCPUUtilization"
             target_value           = 70
             scale_out_cooldown     = 60
-            scale_in_cooldown      = 120
+            scale_in_cooldown      = 300
           }
           "memory" = {
             predefined_metric_type = "ECSServiceAverageMemoryUtilization"
             target_value           = 80
             scale_out_cooldown     = 60
-            scale_in_cooldown      = 120
+            scale_in_cooldown      = 300
           }
           "alb-requests" = {
             predefined_metric_type = "ALBRequestCountPerTarget"
-            target_value           = null # TBD (DDD T18) - requests per target; null skips this policy
+            target_value           = 500
             resource_label         = "${module.alb_internal.lb_arn_suffix}/${module.alb_internal.target_group_arn_suffixes["dofs-blue"]}"
             scale_out_cooldown     = 60
-            scale_in_cooldown      = 120
+            scale_in_cooldown      = 300
           }
         } : p => v if v.target_value != null }
       }
@@ -719,7 +741,7 @@ module "ecs" {
         {
           target_group_arn = module.alb_internal.target_group_arns["shortenurl-blue"]
           container_name   = "shortenurl"
-          container_port   = 8080 # TBD (Kalbe, DDD T17)
+          container_port   = 80
         }
       ]
 
@@ -732,20 +754,20 @@ module "ecs" {
             predefined_metric_type = "ECSServiceAverageCPUUtilization"
             target_value           = 70
             scale_out_cooldown     = 60
-            scale_in_cooldown      = 120
+            scale_in_cooldown      = 300
           }
           "memory" = {
             predefined_metric_type = "ECSServiceAverageMemoryUtilization"
             target_value           = 80
             scale_out_cooldown     = 60
-            scale_in_cooldown      = 120
+            scale_in_cooldown      = 300
           }
           "alb-requests" = {
             predefined_metric_type = "ALBRequestCountPerTarget"
-            target_value           = null # TBD (DDD T18) - requests per target; null skips this policy
+            target_value           = 500
             resource_label         = "${module.alb_internal.lb_arn_suffix}/${module.alb_internal.target_group_arn_suffixes["shortenurl-blue"]}"
             scale_out_cooldown     = 60
-            scale_in_cooldown      = 120
+            scale_in_cooldown      = 300
           }
         } : p => v if v.target_value != null }
       }
@@ -761,29 +783,29 @@ module "ecs" {
 module "cognito" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cognito-user-pool-v6?ref=main"
 
-  name                = "maven-userpool"
+  name                = "shpdev-maven-userpool"
   user_pool_tier      = "LITE"
   deletion_protection = "ACTIVE"
 
   create_domain = true
-  domain        = "maven" # Domain prefix, must be unique in the Region; replace if already taken
+  domain        = "shpdev-maven" # Domain prefix, must be unique in the Region
 
   resource_servers = {
-    "maven-api" = {
-      identifier = "maven-api"
-      name       = "maven-api"
+    "shpdevmaven-api" = {
+      identifier = "shpdevmaven-api"
+      name       = "shpdevmaven-api"
       scopes     = {} # TBD (Kalbe, DDD T11/T12) - e.g. "dofs.write" = "Submit DoFS claims"
     }
   }
 
   clients = {
     for k, scopes in {
-      "kartini"  = [] # TBD (DDD T13) - allowed scopes, e.g. ["maven-api/dofs.write"]
+      "kartini"  = [] # TBD (DDD T13) - allowed scopes, e.g. ["shpdevmaven-api/dofs.write"]
       "kpoin"    = [] # TBD (DDD T13) - allowed scopes
       "app"      = [] # TBD (DDD T13) - allowed scopes
       "loadtest" = [] # TBD (DDD T13) - same scopes as the endpoints under test
       } : k => {
-      name                                 = "maven-${k}"
+      name                                 = "shpdev-maven-${k}"
       generate_secret                      = true
       allowed_oauth_flows_user_pool_client = length(scopes) > 0
       allowed_oauth_flows                  = length(scopes) > 0 ? ["client_credentials"] : []
@@ -808,17 +830,17 @@ module "cognito" {
 module "api_gateway" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-api-gateway-rest-v6?ref=main"
 
-  name          = "maven-api"
+  name          = "shpdev-maven-api"
   description   = "Maven DoFS REST API"
   endpoint_type = "REGIONAL"
 
   create_vpc_link_v2             = true
-  vpc_link_v2_subnet_ids         = module.vpc.other_private_subnet_first_ids
+  vpc_link_v2_subnet_ids         = module.vpc.private_app_subnet_ids
   vpc_link_v2_security_group_ids = [module.sg_vpc_link.security_group_id]
 
   authorizers = {
     "cognito" = {
-      name          = "maven-cognito-authorizer"
+      name          = "shpdev-maven-cognito-authorizer"
       type          = "COGNITO_USER_POOLS"
       provider_arns = [module.cognito.user_pool_arn]
     }
@@ -830,7 +852,7 @@ module "api_gateway" {
       http_method          = "ANY"
       authorization        = "COGNITO_USER_POOLS"
       authorizer_key       = "cognito"
-      authorization_scopes = null # TBD (DDD T11) - e.g. ["maven-api/dofs.write"]
+      authorization_scopes = null # TBD (DDD T11) - e.g. ["shpdevmaven-api/dofs.write"]
       api_key_required     = true
 
       integration = {
@@ -838,7 +860,7 @@ module "api_gateway" {
         integration_http_method = "ANY"
         vpc_link                = "v2"
         integration_target      = module.alb_internal.lb_arn
-        uri                     = "http://${module.alb_internal.lb_dns_name}:8081/"
+        uri                     = "https://shpdev-maven-alb.kalbenutritionals.web.id:8443/" # Hostname covered by the ACM certificate; Kalbe DNS record only needed for on-premises access
         timeout_milliseconds    = 29000
       }
     }
@@ -847,7 +869,7 @@ module "api_gateway" {
       http_method          = "ANY"
       authorization        = "COGNITO_USER_POOLS"
       authorizer_key       = "cognito"
-      authorization_scopes = null # TBD (DDD T11) - e.g. ["maven-api/dofs.write"]
+      authorization_scopes = null # TBD (DDD T11) - e.g. ["shpdevmaven-api/dofs.write"]
       api_key_required     = true
       request_parameters   = { "method.request.path.proxy" = true }
 
@@ -856,7 +878,7 @@ module "api_gateway" {
         integration_http_method = "ANY"
         vpc_link                = "v2"
         integration_target      = module.alb_internal.lb_arn
-        uri                     = "http://${module.alb_internal.lb_dns_name}:8081/{proxy}"
+        uri                     = "https://shpdev-maven-alb.kalbenutritionals.web.id:8443/{proxy}"
         request_parameters      = { "integration.request.path.proxy" = "method.request.path.proxy" }
         timeout_milliseconds    = 29000
       }
@@ -866,7 +888,7 @@ module "api_gateway" {
       http_method          = "ANY"
       authorization        = "COGNITO_USER_POOLS"
       authorizer_key       = "cognito"
-      authorization_scopes = null # TBD (DDD T11) - e.g. ["maven-api/url.write"]
+      authorization_scopes = null # TBD (DDD T11) - e.g. ["shpdevmaven-api/url.write"]
       api_key_required     = true
 
       integration = {
@@ -874,7 +896,7 @@ module "api_gateway" {
         integration_http_method = "ANY"
         vpc_link                = "v2"
         integration_target      = module.alb_internal.lb_arn
-        uri                     = "http://${module.alb_internal.lb_dns_name}:8082/"
+        uri                     = "https://shpdev-maven-alb.kalbenutritionals.web.id:8444/" # Hostname covered by the ACM certificate; Kalbe DNS record only needed for on-premises access
         timeout_milliseconds    = 29000
       }
     }
@@ -883,7 +905,7 @@ module "api_gateway" {
       http_method          = "ANY"
       authorization        = "COGNITO_USER_POOLS"
       authorizer_key       = "cognito"
-      authorization_scopes = null # TBD (DDD T11) - e.g. ["maven-api/url.write"]
+      authorization_scopes = null # TBD (DDD T11) - e.g. ["shpdevmaven-api/url.write"]
       api_key_required     = true
       request_parameters   = { "method.request.path.proxy" = true }
 
@@ -892,7 +914,7 @@ module "api_gateway" {
         integration_http_method = "ANY"
         vpc_link                = "v2"
         integration_target      = module.alb_internal.lb_arn
-        uri                     = "http://${module.alb_internal.lb_dns_name}:8082/{proxy}"
+        uri                     = "https://shpdev-maven-alb.kalbenutritionals.web.id:8444/{proxy}"
         request_parameters      = { "integration.request.path.proxy" = "method.request.path.proxy" }
         timeout_milliseconds    = 29000
       }
@@ -901,6 +923,19 @@ module "api_gateway" {
 
   create_cloudwatch_role = true
 
+  custom_domain = {
+    domain_name     = "api-mavendofs.kalbenutritionals.web.id"
+    endpoint_type   = "REGIONAL"
+    certificate_arn = module.acm_kalbe.certificate_arn
+    security_policy = "TLS_1_2"
+
+    base_path_mappings = {
+      "main" = {
+        stage_key = "main"
+      }
+    }
+  }
+
   stages = {
     "main" = {
       stage_name           = "poc"
@@ -908,7 +943,7 @@ module "api_gateway" {
 
       access_log = {
         create_log_group  = true
-        log_group_name    = "/aws/apigateway/maven-access"
+        log_group_name    = "/aws/apigateway/shpdev-maven-access"
         retention_in_days = 30
         format = jsonencode({
           requestId          = "$context.requestId"
@@ -938,43 +973,43 @@ module "api_gateway" {
 
   api_keys = {
     "kartini" = {
-      name = "maven-key-kartini"
+      name = "shpdev-maven-key-kartini"
     }
     "kpoin" = {
-      name = "maven-key-kpoin"
+      name = "shpdev-maven-key-kpoin"
     }
     "app" = {
-      name = "maven-key-app"
+      name = "shpdev-maven-key-app"
     }
     "loadtest" = {
-      name = "maven-key-loadtest"
+      name = "shpdev-maven-key-loadtest"
     }
   }
 
   usage_plans = {
     "kartini" = {
-      name              = "maven-plan-kartini"
+      name              = "shpdev-maven-plan-kartini"
       stages            = [{ stage_key = "main" }]
       throttle_settings = null # TBD (DDD T15) - { rate_limit = <rps>, burst_limit = <burst> }
       quota_settings    = null # TBD (DDD T15) - { limit = <requests>, period = "DAY" }
       api_key_keys      = ["kartini"]
     }
     "kpoin" = {
-      name              = "maven-plan-kpoin"
+      name              = "shpdev-maven-plan-kpoin"
       stages            = [{ stage_key = "main" }]
       throttle_settings = null # TBD (DDD T15) - { rate_limit = <rps>, burst_limit = <burst> }
       quota_settings    = null # TBD (DDD T15) - { limit = <requests>, period = "DAY" }
       api_key_keys      = ["kpoin"]
     }
     "app" = {
-      name              = "maven-plan-app"
+      name              = "shpdev-maven-plan-app"
       stages            = [{ stage_key = "main" }]
       throttle_settings = null # TBD (DDD T15) - { rate_limit = <rps>, burst_limit = <burst> }
       quota_settings    = null # TBD (DDD T15) - { limit = <requests>, period = "DAY" }
       api_key_keys      = ["app"]
     }
     "loadtest" = {
-      name              = "maven-plan-loadtest"
+      name              = "shpdev-maven-plan-loadtest"
       stages            = [{ stage_key = "main" }]
       throttle_settings = null # TBD - load test target
       quota_settings    = null
@@ -991,10 +1026,10 @@ module "api_gateway" {
 module "waf_api" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-waf?ref=main"
 
-  name        = "maven-api-waf"
+  name        = "shpdev-maven-waf"
   description = "Web Application Firewall for the Maven REST API"
   scope       = "REGIONAL"
-  metric_name = "maven-api-waf"
+  metric_name = "shpdev-maven-waf"
 
   default_action = "allow"
 
@@ -1004,21 +1039,21 @@ module "waf_api" {
       priority                = 1
       managed_rule_group_name = "AWSManagedRulesAmazonIpReputationList"
       override_action         = "none"
-      metric_name             = "maven-waf-ip-reputation"
+      metric_name             = "shpdev-maven-waf-ip-reputation"
     }
     "common-rule-set" = {
       name                    = "AWSManagedRulesCommonRuleSet"
       priority                = 2
       managed_rule_group_name = "AWSManagedRulesCommonRuleSet"
       override_action         = "none"
-      metric_name             = "maven-waf-common"
+      metric_name             = "shpdev-maven-waf-common"
     }
     "known-bad-inputs" = {
       name                    = "AWSManagedRulesKnownBadInputsRuleSet"
       priority                = 3
       managed_rule_group_name = "AWSManagedRulesKnownBadInputsRuleSet"
       override_action         = "none"
-      metric_name             = "maven-waf-bad-inputs"
+      metric_name             = "shpdev-maven-waf-bad-inputs"
     }
   }
 
@@ -1027,7 +1062,7 @@ module "waf_api" {
 
   enable_logging        = true
   create_log_group      = true
-  log_group_name        = "aws-waf-logs-maven"
+  log_group_name        = "aws-waf-logs-shpdev-maven"
   log_retention_in_days = 30
 
   cloudwatch_metrics_enabled = true
@@ -1043,7 +1078,7 @@ module "codebuild" {
   source   = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-codebuild-v6?ref=main"
   for_each = toset(["dofs", "shortenurl"])
 
-  name        = "maven-${each.key}-build"
+  name        = "shpdev-maven-${each.key}-build"
   description = "Build, test and push ${each.key} to ECR"
 
   source_config = {
@@ -1082,7 +1117,7 @@ module "codebuild" {
 module "codedeploy" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-codedeploy-v6?ref=main"
 
-  application_name = "maven-ecs"
+  application_name = "shpdev-maven-ecs"
   compute_platform = "ECS"
 
   deployment_groups = {
@@ -1203,8 +1238,8 @@ data "aws_ssm_parameter" "datasync_ami" {
 module "ec2_tools" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-instances?ref=main"
 
-  iam_role_name             = "maven-ec2-instance-role"
-  iam_instance_profile_name = "maven-ec2-instance-profile"
+  iam_role_name             = "shpdev-maven-ec2-instance-role"
+  iam_instance_profile_name = "shpdev-maven-ec2-instance-profile"
 
   instances = merge(
     { for k, v in {
@@ -1222,7 +1257,7 @@ module "ec2_tools" {
         }
 
         tags = {
-          "Name"    = "maven-loadtest-k6"
+          "Name"    = "shpdev-maven-loadtest-k6"
           "Purpose" = "k6 Load Test (temporary)"
         }
       }
@@ -1242,7 +1277,7 @@ module "ec2_tools" {
         }
 
         tags = {
-          "Name"    = "maven-datasync-agent"
+          "Name"    = "shpdev-maven-datasync-agent"
           "Purpose" = "DataSync Agent (NAS to S3)"
         }
       }
@@ -1258,11 +1293,11 @@ module "ec2_tools" {
 module "datasync" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-datasync?ref=main"
 
-  name_prefix = "maven"
+  name_prefix = "shpdev-maven"
 
   agents = { for k, v in {
     "ec2" = {
-      name                = "maven-datasync-agent"
+      name                = "shpdev-maven-datasync-agent"
       activation_key      = var.datasync_agent_activation_key
       vpc_endpoint_id     = try(module.vpce_datasync[0].endpoint_ids["datasync"], null)
       subnet_arns         = ["arn:aws:ec2:${var.region}:908027374739:subnet/${module.vpc.private_app_subnet_ids[0]}"]
@@ -1279,19 +1314,21 @@ module "datasync" {
     }
   }
 
-  nfs_locations = { for k, v in {
+  smb_locations = { for k, v in {
     "nas" = {
-      server_hostname = ""   # TBD (Kalbe, DDD T22) - NAS IP or hostname reachable over VPN
-      subdirectory    = ""   # TBD (Kalbe, DDD T22) - NFS export path
-      nfs_version     = null # TBD (Kalbe, DDD T22) - AUTOMATIC, NFS3, NFS4_0 or NFS4_1
+      server_hostname = "10.104.1.170"
+      subdirectory    = "/knapps/dev/maven"
+      user            = ""   # TBD (Kalbe) - SMB user with read access to the share
+      domain          = null # TBD (Kalbe) - Windows domain of the SMB user, if any
+      password        = var.datasync_smb_password
       agent_keys      = ["ec2"]
     }
   } : k => v if var.datasync_agent_activation_key != null && var.create_datasync_agent_instance }
 
   tasks = { for k, v in {
     "nas-to-s3" = {
-      name                     = "maven-nas-to-s3"
-      source_location_key      = "nfs.nas"
+      name                     = "shpdev-maven-nas-to-s3"
+      source_location_key      = "smb.nas"
       destination_location_key = "s3.assets"
 
       cloudwatch_log_retention_in_days = 30

@@ -2,7 +2,7 @@
 module "s3_logs" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-s3-bucket?ref=main"
 
-  bucket_name       = "maven-logs-908027374739"
+  bucket_name       = "shpdev-maven-logs-908027374739"
   versioning_status = "Disabled"
 
   enable_server_side_encryption = true
@@ -12,7 +12,7 @@ module "s3_logs" {
   attach_lb_log_delivery_policy         = true
   lb_log_delivery_principal_type        = "service"
   attach_cloudtrail_log_delivery_policy = true
-  cloudtrail_source_arns                = ["arn:aws:cloudtrail:${var.region}:908027374739:trail/maven-trail"]
+  cloudtrail_source_arns                = ["arn:aws:cloudtrail:${var.region}:908027374739:trail/shpdev-maven-trail"]
 
   lifecycle_rules = [
     {
@@ -40,7 +40,7 @@ module "s3_logs" {
 module "cloudtrail_management_events" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cloudtrail-management-events-v6?ref=main"
 
-  trail_name                 = "maven-trail"
+  trail_name                 = "shpdev-maven-trail"
   create_s3_bucket           = false
   s3_bucket_name             = module.s3_logs.bucket_id
   kms_key_arn                = module.kms_cmk.kms_key_arn
@@ -58,7 +58,7 @@ module "cloudtrail_management_events" {
 module "sns_notifications" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-sns-topic-v6?ref=main"
 
-  name              = "maven-notifications"
+  name              = "shpdev-maven-notifications"
   display_name      = "Maven POC Notifications"
   kms_master_key_id = module.kms_cmk.kms_key_arn
 
@@ -66,6 +66,28 @@ module "sns_notifications" {
 
   subscriptions = {
     for email in var.notification_emails : email => {
+      protocol = "email"
+      endpoint = email
+    }
+  }
+
+  tags = {
+    "Resource" = "SNS"
+  }
+}
+
+# SNS Topic - Database Notifications (Aurora alarms)
+module "sns_db_notifications" {
+  source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-sns-topic-v6?ref=main"
+
+  name              = "shpdev-maven-db-notifications"
+  display_name      = "Maven POC Database Notifications"
+  kms_master_key_id = module.kms_cmk.kms_key_arn
+
+  publisher_service_principals = ["cloudwatch.amazonaws.com"]
+
+  subscriptions = {
+    for email in var.db_notification_emails : email => {
       protocol = "email"
       endpoint = email
     }
@@ -93,7 +115,7 @@ module "eventbridge_notifications" {
 
   rules = {
     "guardduty-findings" = {
-      name        = "maven-guardduty-findings"
+      name        = "shpdev-maven-guardduty-findings"
       description = "GuardDuty findings with severity 7 (High) and above"
       event_pattern = jsonencode({
         source      = ["aws.guardduty"]
@@ -120,13 +142,13 @@ module "eventbridge_notifications" {
       }
     }
     "codedeploy-failure" = {
-      name        = "maven-codedeploy-failure"
+      name        = "shpdev-maven-codedeploy-failure"
       description = "CodeDeploy deployment failures of the Maven ECS services"
       event_pattern = jsonencode({
         source      = ["aws.codedeploy"]
         detail-type = ["CodeDeploy Deployment State-change Notification"]
         detail = {
-          application = ["maven-ecs"]
+          application = ["shpdev-maven-ecs"]
           state       = ["FAILURE"]
         }
       })
@@ -147,7 +169,7 @@ module "eventbridge_notifications" {
       }
     }
     "aws-health" = {
-      name        = "maven-aws-health"
+      name        = "shpdev-maven-aws-health"
       description = "AWS Health events affecting this account"
       event_pattern = jsonencode({
         source      = ["aws.health"]
@@ -183,7 +205,7 @@ module "budgets" {
   notification_email_addresses = var.budget_notification_emails
 
   budgets = {
-    "maven-monthly-budget" = {
+    "shpdev-maven-monthly-budget" = {
       budget_type  = "COST"
       limit_amount = "1300" # USD per month
       limit_unit   = "USD"
@@ -217,18 +239,18 @@ module "budgets" {
 module "cost_anomaly_detection" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cost-anomaly-detection?ref=main"
 
-  name_prefix      = "maven"
+  name_prefix      = "shpdev-maven"
   create_sns_topic = false
 
   monitors = {
     "services" = {
-      name = "maven-service-monitor"
+      name = "shpdev-maven-service-monitor"
     }
   }
 
   subscriptions = {
     "daily-email" = {
-      name                       = "maven-anomaly-daily"
+      name                       = "shpdev-maven-anomaly-daily"
       frequency                  = "DAILY"
       monitor_keys               = ["services"]
       subscriber_email_addresses = var.budget_notification_emails
@@ -245,11 +267,11 @@ module "cost_anomaly_detection" {
 module "iam_role_monitoring" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-iam-role?ref=main"
 
-  name                    = "maven-monitoring-ec2-role"
+  name                    = "shpdev-maven-monitoring-ec2-role"
   description             = "Prometheus and Grafana instance: SSM, CloudWatch agent and ECS service discovery"
   trusted_services        = ["ec2.amazonaws.com"]
   create_instance_profile = true
-  instance_profile_name   = "maven-monitoring-ec2-profile"
+  instance_profile_name   = "shpdev-maven-monitoring-ec2-profile"
 
   managed_policy_arns = [
     "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
@@ -339,7 +361,7 @@ module "ec2_monitoring" {
       ]
 
       tags = {
-        "Name"    = "maven-monitoring"
+        "Name"    = "shpdev-maven-monitoring"
         "Purpose" = "Prometheus and Grafana"
         "Backup"  = "daily-ami"
       }
@@ -355,9 +377,9 @@ module "ec2_monitoring" {
 module "backup_monitoring" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-backup?ref=main"
 
-  name_prefix       = "maven"
-  backup_vault_name = "maven-backup-vault"
-  backup_plan_name  = "maven-ec2-daily"
+  name_prefix       = "shpdev-maven"
+  backup_vault_name = "shpdev-maven-backup-vault"
+  backup_plan_name  = "shpdev-maven-ec2-daily"
   kms_key_arn       = module.kms_cmk.kms_key_arn
 
   backup_rules = [
@@ -370,7 +392,7 @@ module "backup_monitoring" {
 
   backup_selections = {
     "monitoring" = {
-      name      = "maven-monitoring"
+      name      = "shpdev-maven-monitoring"
       resources = [module.ec2_monitoring.instance_arns["monitoring"]]
     }
   }
@@ -384,7 +406,7 @@ module "backup_monitoring" {
 module "cloudwatch_alarms" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cloudwatch-alarms-v6?ref=main"
 
-  alarm_name_prefix     = "maven"
+  alarm_name_prefix     = "shpdev-maven"
   default_alarm_actions = [module.sns_notifications.topic_arn]
   default_ok_actions    = [module.sns_notifications.topic_arn]
 
@@ -444,7 +466,7 @@ module "cloudwatch_alarms" {
         alarm_description   = "API Gateway p95 latency above 500 ms"
         namespace           = "AWS/ApiGateway"
         metric_name         = "Latency"
-        dimensions          = { ApiName = "maven-api", Stage = "poc" }
+        dimensions          = { ApiName = "shpdev-maven-api", Stage = "poc" }
         extended_statistic  = "p95"
         period              = 60
         evaluation_periods  = 3
@@ -457,7 +479,7 @@ module "cloudwatch_alarms" {
         alarm_description   = "API Gateway 5XX error rate above 1% for 5 minutes"
         namespace           = "AWS/ApiGateway"
         metric_name         = "5XXError"
-        dimensions          = { ApiName = "maven-api", Stage = "poc" }
+        dimensions          = { ApiName = "shpdev-maven-api", Stage = "poc" }
         statistic           = "Average"
         period              = 60
         evaluation_periods  = 5
@@ -493,6 +515,8 @@ module "cloudwatch_alarms" {
       }
       "aurora-capacity-max" = {
         alarm_description   = "Aurora Serverless v2 at maximum ACU for 10 minutes"
+        alarm_actions       = [module.sns_db_notifications.topic_arn]
+        ok_actions          = [module.sns_db_notifications.topic_arn]
         namespace           = "AWS/RDS"
         metric_name         = "ServerlessDatabaseCapacity"
         dimensions          = { DBClusterIdentifier = module.aurora.cluster_id }
@@ -504,6 +528,8 @@ module "cloudwatch_alarms" {
       }
       "aurora-cpu-high" = {
         alarm_description   = "Aurora CPU above 80% for 10 minutes"
+        alarm_actions       = [module.sns_db_notifications.topic_arn]
+        ok_actions          = [module.sns_db_notifications.topic_arn]
         namespace           = "AWS/RDS"
         metric_name         = "CPUUtilization"
         dimensions          = { DBClusterIdentifier = module.aurora.cluster_id }
@@ -550,6 +576,8 @@ module "cloudwatch_alarms" {
     {
       "aurora-connections-high" = {
         alarm_description   = "Aurora connections above 80% of max_connections"
+        alarm_actions       = [module.sns_db_notifications.topic_arn]
+        ok_actions          = [module.sns_db_notifications.topic_arn]
         namespace           = "AWS/RDS"
         metric_name         = "DatabaseConnections"
         dimensions          = { DBClusterIdentifier = module.aurora.cluster_id }
@@ -557,7 +585,7 @@ module "cloudwatch_alarms" {
         period              = 60
         evaluation_periods  = 5
         comparison_operator = "GreaterThanThreshold"
-        threshold           = 720 # 80% of max_connections (about 900 at 4 ACU); confirm (DDD T28)
+        threshold           = 720 # 80% of max_connections (about 900 at 4 ACU)
       }
     },
     { for k, v in {

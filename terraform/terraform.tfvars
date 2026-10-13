@@ -11,8 +11,16 @@ region = "ap-southeast-3"
 
 #main.tf
 #Notification
-notification_emails        = [] # TBD (DDD T28) - recipients of alarm, GuardDuty, CodeDeploy and AWS Health emails
-budget_notification_emails = [] # TBD (DDD T27) - recipients of budget and cost anomaly emails
+notification_emails = [
+  "Irfan.sobarkah@kalbenutritionals.com",
+  "syarif.hidayat@kalbenutritionals.com"
+]
+db_notification_emails = [
+  "Irfan.sobarkah@kalbenutritionals.com",
+  "syarif.hidayat@kalbenutritionals.com",
+  "novaldi.valentino@kalbenutritionals.com"
+]
+budget_notification_emails = ["Jerie.alhamdani@kalbenutritionals.com"]
 
 #Project Phase Toggles
 create_loadtest_instance       = false # Enable for the load test phase

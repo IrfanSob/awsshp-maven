@@ -9,6 +9,22 @@ variable "region" {
   type        = string
 }
 
+# Global Environment
+variable "org" {
+  description = "Organization code used as the first part of every resource name, e.g. shp"
+  type        = string
+}
+
+variable "env" {
+  description = "Environment code appended to org in every resource name, e.g. dev or prod"
+  type        = string
+}
+
+variable "project" {
+  description = "Project code used in every resource name, e.g. maven. Names follow <org><env>-<project>-<resource>"
+  type        = string
+}
+
 # Main.tf
 # Notification
 variable "notification_emails" {

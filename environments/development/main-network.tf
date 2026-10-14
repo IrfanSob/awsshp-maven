@@ -2,21 +2,21 @@
 module "vpc" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc?ref=main"
 
-  vpc_name = "shpdev-maven"
+  vpc_name = "${var.org}${var.env}-${var.project}-vpc"
   vpc_cidr = "10.177.207.0/24"
   azs      = ["ap-southeast-3a", "ap-southeast-3b", "ap-southeast-3c"]
 
   public_subnets      = ["10.177.207.192/27", "10.177.207.224/28", "10.177.207.240/28"]
-  public_subnet_names = ["shpdev-maven-public-3a", "shpdev-maven-public-3b", "shpdev-maven-public-3c"]
+  public_subnet_names = ["${var.org}${var.env}-${var.project}-public-subnet3a", "${var.org}${var.env}-${var.project}-public-subnet3b", "${var.org}${var.env}-${var.project}-public-subnet3c"]
   public_subnet_azs   = ["ap-southeast-3a", "ap-southeast-3b", "ap-southeast-3c"]
 
   private_app_subnets      = ["10.177.207.0/26", "10.177.207.64/26", "10.177.207.128/26"]
-  private_app_subnet_names = ["shpdev-maven-private-3a", "shpdev-maven-private-3b", "shpdev-maven-private-3c"]
+  private_app_subnet_names = ["${var.org}${var.env}-${var.project}-private-subnet3a", "${var.org}${var.env}-${var.project}-private-subnet3b", "${var.org}${var.env}-${var.project}-private-subnet3c"]
   private_app_subnet_azs   = ["ap-southeast-3a", "ap-southeast-3b", "ap-southeast-3c"]
 
   enable_igw         = true
   enable_nat_gateway = true
-  nat_gateway_name   = "NATGW"
+  nat_gateway_name   = "${var.org}${var.env}-${var.project}-natgw"
 
   tags = {
     "Resource" = "VPC"
@@ -28,7 +28,7 @@ module "vpc_route_tables" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc/aws-vpc-route-table?ref=main"
 
   vpc_id   = module.vpc.vpc_id
-  vpc_name = "shpdev-maven"
+  vpc_name = "${var.org}${var.env}-${var.project}-vpc"
 
   public_subnets      = module.vpc.public_subnet_ids
   enable_public_route = true
@@ -36,8 +36,8 @@ module "vpc_route_tables" {
 
   private_app_subnets = module.vpc.private_app_subnet_ids
 
-  public_route_table_name      = "Public-RT"
-  private_app_route_table_name = "Private-RT"
+  public_route_table_name      = "${var.org}${var.env}-${var.project}-public-rt"
+  private_app_route_table_name = "${var.org}${var.env}-${var.project}-private-rt"
 
   enable_nat_route = true
   nat_gateway_ids  = module.vpc.nat_gateway_ids
@@ -54,7 +54,7 @@ module "s3_gateway_endpoint" {
   vpc_id        = module.vpc.vpc_id
   region        = var.region
   endpoint_type = "Gateway"
-  endpoint_name = "shpdev-maven-s3-gateway-endpoint"
+  endpoint_name = "${var.org}${var.env}-${var.project}-s3-gateway-endpoint"
 
   route_table_ids = [
     module.vpc_route_tables.private_app_route_table_id
@@ -70,9 +70,9 @@ module "vpce_datasync" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc-endpoint/interface-endpoints?ref=main"
   count  = var.create_datasync_agent_instance ? 1 : 0
 
-  name_prefix                = "shpdev-maven-datasync"
+  name_prefix                = "${var.org}${var.env}-${var.project}-datasync"
   vpc_id                     = module.vpc.vpc_id
-  security_group_name        = "shpdev-maven-vpce-datasync-sg"
+  security_group_name        = "${var.org}${var.env}-${var.project}-vpce-datasync-sg"
   security_group_description = "Security Group for the DataSync interface endpoint"
 
   security_group_ingress_rules = [
@@ -101,7 +101,7 @@ module "vpce_datasync" {
 
   interface_endpoints = {
     "datasync" = {
-      name                = "shpdev-maven-datasync-endpoint"
+      name                = "${var.org}${var.env}-${var.project}-datasync-endpoint"
       service_name        = "com.amazonaws.${var.region}.datasync"
       subnet_ids          = [module.vpc.private_app_subnet_ids[0]]
       private_dns_enabled = true
@@ -124,8 +124,8 @@ module "vpc_flow_logs" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpc-flow-logs?ref=main"
 
   vpc_id         = module.vpc.vpc_id
-  log_group_name = "/aws/vpc/shpdev-maven-flow-logs"
-  flow_log_name  = "shpdev-maven-vpc-flow-log"
+  log_group_name = "/aws/vpc/${var.org}${var.env}-${var.project}-flow-logs"
+  flow_log_name  = "${var.org}${var.env}-${var.project}-vpc-flow-log"
   traffic_type   = "ALL"
   retention_days = 30 # Flow log retention
 
@@ -139,7 +139,7 @@ module "vpn_onprem" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-vpn-site-to-site?ref=main"
   count  = 1 # Set to 0 to skip the Site-to-Site VPN
 
-  name = "shpdev-maven-vpn-onprem"
+  name = "${var.org}${var.env}-${var.project}-vpn-onprem"
 
   create_customer_gateway      = true
   customer_gateway_device_name = "KN-Network"
@@ -169,7 +169,7 @@ module "vpn_onprem" {
 module "sg_vpc_link" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "shpdev-maven-vpclink-sg"
+  name        = "${var.org}${var.env}-${var.project}-vpclink-sg"
   description = "Security Group for the API Gateway VPC link to the internal ALB"
   vpc_id      = module.vpc.vpc_id
 
@@ -199,7 +199,7 @@ module "sg_vpc_link" {
 module "sg_alb" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "shpdev-maven-alb-sg"
+  name        = "${var.org}${var.env}-${var.project}-alb-sg"
   description = "Security Group for the internal Application Load Balancer"
   vpc_id      = module.vpc.vpc_id
 
@@ -282,7 +282,7 @@ module "sg_alb" {
 module "sg_ecs" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "shpdev-maven-ecs-sg"
+  name        = "${var.org}${var.env}-${var.project}-ecs-sg"
   description = "Security Group for ECS Fargate tasks"
   vpc_id      = module.vpc.vpc_id
 
@@ -331,7 +331,7 @@ module "sg_ecs" {
 module "sg_aurora" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "shpdev-maven-aurora-sg"
+  name        = "${var.org}${var.env}-${var.project}-aurora-sg"
   description = "Security Group for Aurora PostgreSQL"
   vpc_id      = module.vpc.vpc_id
 
@@ -365,7 +365,7 @@ module "sg_aurora" {
 module "sg_valkey" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "shpdev-maven-valkey-sg"
+  name        = "${var.org}${var.env}-${var.project}-valkey-sg"
   description = "Security Group for ElastiCache Valkey"
   vpc_id      = module.vpc.vpc_id
 
@@ -389,7 +389,7 @@ module "sg_valkey" {
 module "sg_monitoring" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "shpdev-maven-monitoring-sg"
+  name        = "${var.org}${var.env}-${var.project}-monitoring-sg"
   description = "Security Group for the Prometheus and Grafana instance"
   vpc_id      = module.vpc.vpc_id
 
@@ -434,7 +434,7 @@ module "sg_monitoring" {
 module "sg_loadtest" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "shpdev-maven-loadtest-sg"
+  name        = "${var.org}${var.env}-${var.project}-loadtest-sg"
   description = "Security Group for the k6 load test instance"
   vpc_id      = module.vpc.vpc_id
 
@@ -458,7 +458,7 @@ module "sg_loadtest" {
 module "sg_datasync_agent" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-security-group?ref=main"
 
-  name        = "shpdev-maven-datasync-agent-sg"
+  name        = "${var.org}${var.env}-${var.project}-datasync-agent-sg"
   description = "Security Group for the DataSync agent instance"
   vpc_id      = module.vpc.vpc_id
 

@@ -108,8 +108,8 @@ output "cicd_services" {
     for k in ["dofs", "shortenurl"] : k => {
       codebuild_project           = module.codebuild[k].project_name
       codedeploy_deployment_group = module.codedeploy.deployment_group_names[k]
-      ecr_repository_url          = module.ecr.repository_urls["maven-${k}"]
-      task_definition_family      = "maven-${k}"
+      ecr_repository_url          = module.ecr.repository_urls["${var.org}${var.env}-${var.project}-${k}"]
+      task_definition_family      = "${var.org}${var.env}-${var.project}-${k}"
       container_name              = k
       container_port              = 80
     }

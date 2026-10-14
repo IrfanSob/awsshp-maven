@@ -2,7 +2,7 @@
 module "s3_logs" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-s3-bucket?ref=main"
 
-  bucket_name       = "shpdev-maven-logs-908027374739"
+  bucket_name       = "${var.org}${var.env}-${var.project}-logs-908027374739"
   versioning_status = "Disabled"
 
   enable_server_side_encryption = true
@@ -12,7 +12,7 @@ module "s3_logs" {
   attach_lb_log_delivery_policy         = true
   lb_log_delivery_principal_type        = "service"
   attach_cloudtrail_log_delivery_policy = true
-  cloudtrail_source_arns                = ["arn:aws:cloudtrail:${var.region}:908027374739:trail/shpdev-maven-trail"]
+  cloudtrail_source_arns                = ["arn:aws:cloudtrail:${var.region}:908027374739:trail/${var.org}${var.env}-${var.project}-trail"]
 
   lifecycle_rules = [
     {
@@ -40,7 +40,7 @@ module "s3_logs" {
 module "cloudtrail_management_events" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cloudtrail-management-events-v6?ref=main"
 
-  trail_name                 = "shpdev-maven-trail"
+  trail_name                 = "${var.org}${var.env}-${var.project}-trail"
   create_s3_bucket           = false
   s3_bucket_name             = module.s3_logs.bucket_id
   kms_key_arn                = module.kms_cmk.kms_key_arn
@@ -58,7 +58,7 @@ module "cloudtrail_management_events" {
 module "sns_notifications" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-sns-topic-v6?ref=main"
 
-  name              = "shpdev-maven-notifications"
+  name              = "${var.org}${var.env}-${var.project}-notifications"
   display_name      = "Maven POC Notifications"
   kms_master_key_id = module.kms_cmk.kms_key_arn
 
@@ -80,7 +80,7 @@ module "sns_notifications" {
 module "sns_db_notifications" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-sns-topic-v6?ref=main"
 
-  name              = "shpdev-maven-db-notifications"
+  name              = "${var.org}${var.env}-${var.project}-db-notifications"
   display_name      = "Maven POC Database Notifications"
   kms_master_key_id = module.kms_cmk.kms_key_arn
 
@@ -115,7 +115,7 @@ module "eventbridge_notifications" {
 
   rules = {
     "guardduty-findings" = {
-      name        = "shpdev-maven-guardduty-findings"
+      name        = "${var.org}${var.env}-${var.project}-guardduty-findings"
       description = "GuardDuty findings with severity 7 (High) and above"
       event_pattern = jsonencode({
         source      = ["aws.guardduty"]
@@ -142,13 +142,13 @@ module "eventbridge_notifications" {
       }
     }
     "codedeploy-failure" = {
-      name        = "shpdev-maven-codedeploy-failure"
+      name        = "${var.org}${var.env}-${var.project}-codedeploy-failure"
       description = "CodeDeploy deployment failures of the Maven ECS services"
       event_pattern = jsonencode({
         source      = ["aws.codedeploy"]
         detail-type = ["CodeDeploy Deployment State-change Notification"]
         detail = {
-          application = ["shpdev-maven-ecs"]
+          application = ["${var.org}${var.env}-${var.project}-ecs"]
           state       = ["FAILURE"]
         }
       })
@@ -169,7 +169,7 @@ module "eventbridge_notifications" {
       }
     }
     "aws-health" = {
-      name        = "shpdev-maven-aws-health"
+      name        = "${var.org}${var.env}-${var.project}-aws-health"
       description = "AWS Health events affecting this account"
       event_pattern = jsonencode({
         source      = ["aws.health"]
@@ -205,7 +205,7 @@ module "budgets" {
   notification_email_addresses = var.budget_notification_emails
 
   budgets = {
-    "shpdev-maven-monthly-budget" = {
+    "${var.org}${var.env}-${var.project}-monthly-budget" = {
       budget_type  = "COST"
       limit_amount = "1300" # USD per month
       limit_unit   = "USD"
@@ -239,18 +239,18 @@ module "budgets" {
 module "cost_anomaly_detection" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cost-anomaly-detection?ref=main"
 
-  name_prefix      = "shpdev-maven"
+  name_prefix      = "${var.org}${var.env}-${var.project}"
   create_sns_topic = false
 
   monitors = {
     "services" = {
-      name = "shpdev-maven-service-monitor"
+      name = "${var.org}${var.env}-${var.project}-service-monitor"
     }
   }
 
   subscriptions = {
     "daily-email" = {
-      name                       = "shpdev-maven-anomaly-daily"
+      name                       = "${var.org}${var.env}-${var.project}-anomaly-daily"
       frequency                  = "DAILY"
       monitor_keys               = ["services"]
       subscriber_email_addresses = var.budget_notification_emails
@@ -267,11 +267,11 @@ module "cost_anomaly_detection" {
 module "iam_role_monitoring" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-iam-role?ref=main"
 
-  name                    = "shpdev-maven-monitoring-ec2-role"
+  name                    = "${var.org}${var.env}-${var.project}-monitoring-ec2-role"
   description             = "Prometheus and Grafana instance: SSM, CloudWatch agent and ECS service discovery"
   trusted_services        = ["ec2.amazonaws.com"]
   create_instance_profile = true
-  instance_profile_name   = "shpdev-maven-monitoring-ec2-profile"
+  instance_profile_name   = "${var.org}${var.env}-${var.project}-monitoring-ec2-profile"
 
   managed_policy_arns = [
     "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
@@ -321,11 +321,6 @@ module "iam_role_monitoring" {
   }
 }
 
-# AMI - Amazon Linux 2023 (latest)
-data "aws_ssm_parameter" "al2023_x86_64" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
-}
-
 # EC2 Instance - Prometheus and Grafana
 module "ec2_monitoring" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-ec2-instances?ref=main"
@@ -335,7 +330,7 @@ module "ec2_monitoring" {
 
   instances = {
     "monitoring" = {
-      ami_id             = data.aws_ssm_parameter.al2023_x86_64.insecure_value
+      ami_id             = "ami-01a74999f054ec9c2" # Amazon Linux 2023 x86_64 (al2023-ami-2023.12.20261012.0)
       instance_type      = "t3.large"
       subnet_id          = module.vpc.private_app_subnet_ids[0]
       security_group_ids = [module.sg_monitoring.security_group_id]
@@ -361,7 +356,7 @@ module "ec2_monitoring" {
       ]
 
       tags = {
-        "Name"    = "shpdev-maven-monitoring"
+        "Name"    = "${var.org}${var.env}-${var.project}-monitoring"
         "Purpose" = "Prometheus and Grafana"
         "Backup"  = "daily-ami"
       }
@@ -377,9 +372,9 @@ module "ec2_monitoring" {
 module "backup_monitoring" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-backup?ref=main"
 
-  name_prefix       = "shpdev-maven"
-  backup_vault_name = "shpdev-maven-backup-vault"
-  backup_plan_name  = "shpdev-maven-ec2-daily"
+  name_prefix       = "${var.org}${var.env}-${var.project}"
+  backup_vault_name = "${var.org}${var.env}-${var.project}-backup-vault"
+  backup_plan_name  = "${var.org}${var.env}-${var.project}-ec2-daily"
   kms_key_arn       = module.kms_cmk.kms_key_arn
 
   backup_rules = [
@@ -392,7 +387,7 @@ module "backup_monitoring" {
 
   backup_selections = {
     "monitoring" = {
-      name      = "shpdev-maven-monitoring"
+      name      = "${var.org}${var.env}-${var.project}-monitoring"
       resources = [module.ec2_monitoring.instance_arns["monitoring"]]
     }
   }
@@ -406,7 +401,7 @@ module "backup_monitoring" {
 module "cloudwatch_alarms" {
   source = "git::https://github.com/IrfanSob/awsshp-maven.git//modules/aws-cloudwatch-alarms-v6?ref=main"
 
-  alarm_name_prefix     = "shpdev-maven"
+  alarm_name_prefix     = "${var.org}${var.env}-${var.project}"
   default_alarm_actions = [module.sns_notifications.topic_arn]
   default_ok_actions    = [module.sns_notifications.topic_arn]
 
@@ -466,7 +461,7 @@ module "cloudwatch_alarms" {
         alarm_description   = "API Gateway p95 latency above 500 ms"
         namespace           = "AWS/ApiGateway"
         metric_name         = "Latency"
-        dimensions          = { ApiName = "shpdev-maven-api", Stage = "poc" }
+        dimensions          = { ApiName = "${var.org}${var.env}-${var.project}-api", Stage = "poc" }
         extended_statistic  = "p95"
         period              = 60
         evaluation_periods  = 3
@@ -479,7 +474,7 @@ module "cloudwatch_alarms" {
         alarm_description   = "API Gateway 5XX error rate above 1% for 5 minutes"
         namespace           = "AWS/ApiGateway"
         metric_name         = "5XXError"
-        dimensions          = { ApiName = "shpdev-maven-api", Stage = "poc" }
+        dimensions          = { ApiName = "${var.org}${var.env}-${var.project}-api", Stage = "poc" }
         statistic           = "Average"
         period              = 60
         evaluation_periods  = 5

@@ -9,6 +9,11 @@ aws_default_tags = {
 }
 region = "ap-southeast-3"
 
+#Global Environment
+org     = "shp"
+env     = "dev"
+project = "maven"
+
 #main.tf
 #Notification
 notification_emails = [
